@@ -64,9 +64,16 @@ jobs:
       - name: Check the generated project
         run: xcodebuild -list -project App/AdvancedNotes.xcodeproj
 
+      # Compile errors are re-emitted as ::error:: annotations on purpose.
+      #
+      # Workflow logs need an authenticated API call to read, but a check run's
+      # annotations are public on a public repo. With no Mac here, annotations
+      # are the only way the build's errors can be read back without setting up
+      # a token, so anything worth seeing has to leave through that channel.
       - name: Archive
         run: |
-          set -o pipefail
+          mkdir -p build
+          set +e
           xcodebuild archive \
             -project App/AdvancedNotes.xcodeproj \
             -scheme AdvancedNotes \
@@ -78,7 +85,23 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
-            | tee build/xcodebuild.log
+            2>&1 | tee build/xcodebuild.log
+          status=${PIPESTATUS[0]}
+          set -e
+
+          if [ "$status" -ne 0 ]; then
+            echo "--- errors ---"
+            # GitHub caps annotations, so take the first few distinct ones:
+            # the first real error is almost always the one that matters.
+            grep -E "error:" build/xcodebuild.log \
+              | grep -vE "^\s*$" \
+              | sort -u | head -15 \
+              | while IFS= read -r line; do
+                  echo "::error::${line}"
+                done
+            tail -40 build/xcodebuild.log
+          fi
+          exit "$status"
 
       # An .ipa is just a zip with the .app inside a Payload directory.
       # Sideloadly re-signs it, so shipping it unsigned is the whole point.
