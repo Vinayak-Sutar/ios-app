@@ -1,0 +1,129 @@
+# Builds the iOS app on a macOS runner and publishes an UNSIGNED .ipa.
+#
+# There is no paid Apple Developer account, so there is no TestFlight. The
+# artifact this produces is downloaded on Windows and signed with a free Apple
+# ID by Sideloadly, which installs it over USB. That signature lasts 7 days.
+#
+# Standard macOS runners are free on public repositories. Larger runners never
+# are, so do not change `runs-on` to an XL image.
+name: ios
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  XCODEGEN_VERSION: "2.48.0"
+
+jobs:
+  build:
+    name: Build unsigned .ipa
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+
+      # Printed before anything else on purpose. The runner images change their
+      # Xcode and SDK roster without notice, and with no Mac to check against,
+      # the build log is the only place to find out what is actually installed.
+      - name: What is on this runner
+        run: |
+          echo "--- Xcodes ---"
+          ls /Applications | grep -i xcode || true
+          echo "--- selected ---"
+          xcodebuild -version
+          echo "--- SDKs ---"
+          xcodebuild -showsdks | grep -i ios || true
+          echo "--- swift ---"
+          swift --version
+
+      - name: Cache SwiftPM
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/org.swift.swiftpm
+            build/SourcePackages
+          key: spm-${{ runner.os }}-${{ hashFiles('Package.swift', 'App/project.yml') }}
+          restore-keys: spm-${{ runner.os }}-
+
+      - name: Install XcodeGen
+        run: |
+          brew install xcodegen
+          xcodegen --version
+
+      - name: Generate the project
+        working-directory: App
+        run: xcodegen generate
+
+      # Fails in seconds if the spec is wrong, rather than after a full build.
+      - name: Check the generated project
+        run: xcodebuild -list -project App/AdvancedNotes.xcodeproj
+
+      - name: Archive
+        run: |
+          set -o pipefail
+          xcodebuild archive \
+            -project App/AdvancedNotes.xcodeproj \
+            -scheme AdvancedNotes \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath build/AdvancedNotes.xcarchive \
+            -clonedSourcePackagesDirPath build/SourcePackages \
+            CURRENT_PROJECT_VERSION=${{ github.run_number }} \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            | tee build/xcodebuild.log
+
+      # An .ipa is just a zip with the .app inside a Payload directory.
+      # Sideloadly re-signs it, so shipping it unsigned is the whole point.
+      - name: Package Payload into an .ipa
+        run: |
+          APP_PATH="build/AdvancedNotes.xcarchive/Products/Applications/AdvancedNotes.app"
+          test -d "$APP_PATH" || { echo "::error::no .app in the archive"; exit 1; }
+          mkdir -p build/Payload
+          cp -R "$APP_PATH" build/Payload/
+          (cd build && zip -qry "AdvancedNotes-${{ github.run_number }}-unsigned.ipa" Payload)
+          ls -lh build/*.ipa
+
+      - name: Upload the .ipa
+        uses: actions/upload-artifact@v4
+        with:
+          name: AdvancedNotes-unsigned-ipa
+          path: build/*.ipa
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload dSYMs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dsyms
+          path: build/AdvancedNotes.xcarchive/dSYMs
+          if-no-files-found: warn
+
+      - name: Upload the build log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcodebuild-log
+          path: build/xcodebuild.log
+          if-no-files-found: warn
+
+      - name: Summarise
+        if: always()
+        run: |
+          {
+            echo "### iOS build ${{ github.run_number }}"
+            echo ""
+            echo '- Xcode: `'"$(xcodebuild -version | head -1)"'`'
+            echo "- Artifact: **AdvancedNotes-unsigned-ipa**"
+            echo ""
+            echo "Download it, then in Sideloadly on Windows: pick the .ipa, enter the free Apple ID, Start."
+            echo "The signature lasts 7 days."
+          } >> "$GITHUB_STEP_SUMMARY"

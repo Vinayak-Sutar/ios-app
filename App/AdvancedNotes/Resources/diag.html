@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Advanced Notes — Diagnostics</title>
+<style>
+  :root {
+    --bg: #F7F5F0; --surface: #FFFFFF; --border: #E6E1D7;
+    --text: #1E1C19; --muted: #68625A; --accent: #4F52D9;
+    --ok-ink: #1B7A4F; --ok-tint: #E3F6EC;
+    --bad-ink: #B42318; --bad-tint: #FDECEA;
+    --warn-ink: #8A5A00; --warn-tint: #FCF4D6;
+    --code-bg: #F3F0EA;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #141416; --surface: #1C1C20; --border: #2C2C32;
+      --text: #ECEAE6; --muted: #A3A099; --accent: #8E92FF;
+      --ok-ink: #6ED6A4; --ok-tint: #16281F;
+      --bad-ink: #FF9A90; --bad-tint: #2B1917;
+      --warn-ink: #E8C367; --warn-tint: #2A2416;
+      --code-bg: #212126;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 20px 16px 48px;
+    background: var(--bg); color: var(--text);
+    font: 16px/1.5 -apple-system, system-ui, sans-serif;
+    -webkit-text-size-adjust: 100%;
+  }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color: var(--muted); font-size: 14px; margin: 0 0 20px; }
+  .card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: 14px 16px; margin-bottom: 12px;
+  }
+  .card h2 {
+    font-size: 13px; text-transform: uppercase; letter-spacing: .06em;
+    color: var(--muted); margin: 0 0 10px; font-weight: 600;
+  }
+  .row { display: flex; justify-content: space-between; gap: 12px; padding: 5px 0; align-items: baseline; }
+  .row + .row { border-top: 1px solid var(--border); }
+  .k { color: var(--muted); font-size: 14px; flex: 0 0 auto; }
+  .v { text-align: right; font-variant-numeric: tabular-nums; word-break: break-word; }
+  .v.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+  .pill {
+    display: inline-block; padding: 2px 9px; border-radius: 999px;
+    font-size: 13px; font-weight: 600;
+  }
+  .ok   { background: var(--ok-tint);   color: var(--ok-ink); }
+  .bad  { background: var(--bad-tint);  color: var(--bad-ink); }
+  .warn { background: var(--warn-tint); color: var(--warn-ink); }
+  button {
+    font: inherit; font-weight: 600; padding: 11px 16px; border-radius: 10px;
+    border: 1px solid var(--border); background: var(--surface); color: var(--text);
+    -webkit-appearance: none;
+  }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button:disabled { opacity: .5; }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+  pre {
+    background: var(--code-bg); border: 1px solid var(--border); border-radius: 10px;
+    padding: 12px; overflow-x: auto; font-size: 12px; line-height: 1.45;
+    max-height: 45vh; overflow-y: auto; margin: 0;
+  }
+  .verdict { margin-top: 8px; font-size: 14px; }
+</style>
+</head>
+<body>
+
+<h1>Advanced Notes</h1>
+<p class="sub">Milestone 0 diagnostics. Everything the app can tell us about itself.</p>
+
+<div class="actions">
+  <button class="primary" id="run">Run probes</button>
+  <button id="refresh">Refresh</button>
+  <button id="logs">Logs</button>
+  <button id="raw">Raw JSON</button>
+</div>
+
+<div id="out"></div>
+<pre id="blob" hidden></pre>
+
+<script>
+const out = document.getElementById('out');
+const blob = document.getElementById('blob');
+
+function pill(ok, text, warn) {
+  const cls = warn ? 'warn' : (ok ? 'ok' : 'bad');
+  return `<span class="pill ${cls}">${esc(text)}</span>`;
+}
+function esc(s) {
+  return String(s == null ? '—' : s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+}
+function row(k, v, mono) {
+  return `<div class="row"><span class="k">${esc(k)}</span><span class="v${mono ? ' mono' : ''}">${v}</span></div>`;
+}
+function card(title, rows, extra) {
+  return `<div class="card"><h2>${esc(title)}</h2>${rows.join('')}${extra || ''}</div>`;
+}
+function num(x, places) {
+  return typeof x === 'number' ? x.toFixed(places == null ? 3 : places) : '—';
+}
+
+function render(d) {
+  const html = [];
+
+  html.push(card('App', [
+    row('version', esc(d.app.version + ' (' + d.app.build + ')')),
+    row('iOS', esc(d.app.iosVersion)),
+    row('device', esc(d.app.device), true)
+  ]));
+
+  html.push(card('On-device language model', [
+    row('availability', pill(d.model.isAvailable, d.model.availability)),
+  ]));
+
+  const e = d.embedder;
+  html.push(card('Contextual embedder', [
+    row('status', pill(e.ok, e.ok ? 'loaded' : 'unavailable')),
+    e.detail ? row('detail', esc(e.detail), true) : '',
+    row('dimension', esc(e.dimension)),
+    row('max sequence', esc(e.maximumSequenceLength)),
+    row('model', esc(e.modelIdentifier), true),
+    row('revision', esc(e.revision)),
+    row('embedder id', esc(e.embedderID), true)
+  ]));
+
+  const s = d.sentenceEmbedding;
+  html.push(card('Sentence embedding (the simpler alternative)', [
+    row('status', pill(s.ok, s.ok ? 'available' : 'unavailable')),
+    row('dimension', esc(s.dimension)),
+    s.detail ? row('detail', esc(s.detail)) : ''
+  ]));
+
+  const st = d.storage;
+  html.push(card('Storage', [
+    row('round trip', pill(st.writable, st.writable ? 'write + read ok' : 'failed')),
+    st.detail ? row('detail', esc(st.detail), true) : '',
+    row('visible in Files', pill(st.visibleInFilesApp, st.visibleInFilesApp ? 'yes' : 'no')),
+    row('notes on disk', esc(st.noteCount)),
+    row('vault', esc(st.vaultPath), true)
+  ]));
+
+  if (d.probes) {
+    const p = d.probes;
+    const modelOk = p.modelProbe.startsWith('ok');
+    const rows = [
+      row('model round trip', pill(modelOk, p.modelProbe)),
+      row('latency', esc(p.modelLatencyMS) + ' ms')
+    ];
+    let extra = '';
+    if (p.separation) {
+      const sep = p.separation;
+      const good = sep.gap >= 0.08;
+      const weak = sep.gap >= 0.02 && sep.gap < 0.08;
+      rows.push(row('same topic', num(sep.withinTopic)));
+      rows.push(row('different topics', num(sep.acrossTopics)));
+      rows.push(row('gap', pill(good, num(sep.gap), weak)));
+      rows.push(row('embedding time', esc(sep.elapsedMS) + ' ms for ' + esc(sep.samples)));
+      extra = `<p class="verdict">${esc(sep.verdict)}</p>`;
+    }
+    rows.push(row('ran at', esc(p.ranAt), true));
+    html.push(card('Probes', rows, extra));
+  } else {
+    html.push(card('Probes', [row('', '<span class="k">Not run yet. Tap Run probes.</span>')]));
+  }
+
+  const t = d.thresholds;
+  html.push(card('Thresholds in use', [
+    row('file floor', num(t.fileFloor, 2)),
+    row('review floor', num(t.reviewFloor, 2)),
+    row('min margin', num(t.minMargin, 2)),
+    row('dedupe (name)', num(t.dedupeName, 2)),
+    row('dedupe (centroid)', num(t.dedupeCentroid, 2)),
+    row('max collections', esc(t.maxCollections))
+  ]));
+
+  out.innerHTML = html.join('');
+  blob.textContent = JSON.stringify(d, null, 2);
+}
+
+let latest = null;
+
+async function load(path, method) {
+  out.innerHTML = '<div class="card">Working…</div>';
+  try {
+    const res = await fetch(path, { method: method || 'GET' });
+    latest = await res.json();
+    render(latest);
+  } catch (err) {
+    out.innerHTML = '<div class="card"><h2>Could not reach the local server</h2><pre>'
+      + esc(err && err.message) + '</pre></div>';
+  }
+}
+
+document.getElementById('refresh').onclick = () => load('/api/diag');
+document.getElementById('run').onclick = async (ev) => {
+  ev.target.disabled = true;
+  ev.target.textContent = 'Running…';
+  await load('/api/diag/probe', 'POST');
+  ev.target.disabled = false;
+  ev.target.textContent = 'Run probes';
+};
+document.getElementById('raw').onclick = () => { blob.hidden = !blob.hidden; };
+document.getElementById('logs').onclick = async () => {
+  const res = await fetch('/api/diag/log');
+  blob.textContent = await res.text();
+  blob.hidden = false;
+  blob.scrollTop = blob.scrollHeight;
+};
+
+load('/api/diag');
+</script>
+</body>
+</html>

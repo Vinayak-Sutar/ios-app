@@ -1,0 +1,76 @@
+# XcodeGen spec. The .xcodeproj is GENERATED, never committed.
+#
+# XcodeGen cannot run on Windows and `tuist generate` is macOS-only, so this
+# file is authored here and turned into a project on the CI runner. That is
+# only tolerable because almost nothing lives in the project: all the code is
+# in SwiftPM targets, so this spec changes about twice a quarter.
+#
+# Regenerate locally on a Mac, or in CI, with:  cd App && xcodegen generate
+
+name: AdvancedNotes
+
+options:
+  bundleIdPrefix: app.advancednotes
+  createIntermediateGroups: true
+  deploymentTarget:
+    iOS: "26.0"          # FoundationModels needs iOS 26 or newer
+  groupSortPosition: top
+
+packages:
+  NotesCore:
+    # The pure, dependency-free package at the repo root — the only code that
+    # also builds and tests on Windows.
+    path: ..
+  FlyingFox:
+    url: https://github.com/swhitty/FlyingFox.git
+    exactVersion: 0.27.1
+
+targets:
+  AdvancedNotes:
+    type: application
+    platform: iOS
+    sources:
+      - path: AdvancedNotes
+        excludes:
+          - Resources/**
+      - path: AdvancedNotes/Resources
+        buildPhase: resources
+    dependencies:
+      - package: NotesCore
+        product: NotesCore
+      - package: FlyingFox
+        product: FlyingFox
+    info:
+      path: AdvancedNotes/Info.plist
+      properties:
+        CFBundleDisplayName: Advanced Notes
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        UILaunchScreen: {}
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        # The vault is meant to be openable in the Files app: it keeps the
+        # promise that notes are plain files, and with no debugger available it
+        # is how the frontmatter the app writes gets inspected.
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: true
+        # The UI is served by an in-process HTTP server on loopback. ATS would
+        # otherwise block the plain-HTTP load; this is the narrowest exception
+        # that allows it.
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.advancednotes.app
+        MARKETING_VERSION: "0.1"
+        CURRENT_PROJECT_VERSION: "1"
+        SWIFT_VERSION: "6.0"
+        TARGETED_DEVICE_FAMILY: "1"       # iPhone only for the prototype
+        SWIFT_STRICT_CONCURRENCY: complete
+        # Without these, TestFlight-style crash reports and any symbolication
+        # arrive useless.
+        DEBUG_INFORMATION_FORMAT: dwarf-with-dsym

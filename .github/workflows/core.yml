@@ -1,0 +1,84 @@
+# The fast, free gate. NotesCore has no dependencies and no Apple-only
+# imports, so it builds and tests on Windows and Linux in about a minute. This
+# is the only feedback available without a Mac, so it runs on every push and
+# must stay green.
+name: core
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: core-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: NotesCore (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # Windows is the developer's own machine, so it is the one that has to
+        # work. Linux is a free second opinion that catches anything we have
+        # accidentally made platform-specific.
+        os: [windows-latest, ubuntu-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Swift
+        uses: SwiftyLab/setup-swift@v1
+        with:
+          swift-version: "6.2"
+
+      - name: Toolchain version
+        run: swift --version
+
+      - name: Build
+        run: swift build
+
+      - name: Test
+        run: swift test
+
+  lint:
+    name: No platform APIs in NotesCore
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # NotesCore being portable is what makes local testing possible, and it
+      # is exactly the kind of property that erodes silently. A grep is a
+      # crude check but it never forgets.
+      - name: Forbidden imports and APIs
+        run: |
+          set -u
+          fail=0
+          banned_imports='^\s*import\s+(UIKit|SwiftUI|FoundationModels|NaturalLanguage|CoreSpotlight|WebKit|SQLite3|GRDB|FlyingFox|CryptoKit|OSLog)\b'
+          if grep -rnE "$banned_imports" Sources/NotesCore; then
+            echo "::error::NotesCore must not import platform frameworks"
+            fail=1
+          fi
+
+          # Swift's Hasher is seeded per process, so anything persisted that
+          # depends on it changes meaning on every launch -- the same trap
+          # Python's hash() set in the original app.
+          if grep -rnE '\b(Hasher\(|\.hashValue)\b' Sources/NotesCore; then
+            echo "::error::use a stable hash in NotesCore, not Hasher/hashValue"
+            fail=1
+          fi
+
+          # NSRegularExpression is ICU and varies by platform, which would make
+          # Windows test results stop being evidence about iOS behaviour.
+          if grep -rnE '\bNSRegularExpression\b' Sources/NotesCore; then
+            echo "::error::use the stdlib Regex type, not NSRegularExpression"
+            fail=1
+          fi
+
+          # Locale-sensitive casing is how slugs quietly differ between devices.
+          if grep -rnE '\b(localizedLowercase|localizedUppercase|lowercased\(with:|uppercased\(with:)' Sources/NotesCore; then
+            echo "::error::use locale-insensitive lowercased()/uppercased() in NotesCore"
+            fail=1
+          fi
+
+          exit $fail
