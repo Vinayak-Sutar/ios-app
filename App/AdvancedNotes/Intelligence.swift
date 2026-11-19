@@ -134,7 +134,12 @@ final class Intelligence {
             return .failure(ProbeError.unavailable(Self.availability.describe))
         }
         do {
-            let session = LanguageModelSession()
+            // Instructions passed explicitly: Apple's own examples always do,
+            // and a one-line role also keeps a chatty model from answering in
+            // a sentence when the schema asks for a word.
+            let session = LanguageModelSession(
+                instructions: "You answer with a single lowercase word and nothing else."
+            )
             let response = try await session.respond(
                 to: "Reply with one lowercase word: the colour of a clear midday sky.",
                 generating: ProbeAnswer.self,

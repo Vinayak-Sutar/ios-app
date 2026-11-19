@@ -85,12 +85,36 @@ app is suspended. Once the app returns to the foreground, `HTTPServer.run()`
 detects this, throwing `SocketError.disconnected`. The server must then be
 started once more."* `LocalServer` has a supervisor loop for exactly this.
 
+Checked in the source, so `[.contentType: "..."]` is fine and not the
+deprecated overload:
+
+```swift
+public struct HTTPHeaders: Hashable, Sendable, Sequence, ExpressibleByDictionaryLiteral {
+    public init(dictionaryLiteral elements: (HTTPHeader, String)...)
+}
+static let contentType = HTTPHeader("Content-Type")
+static let ok = HTTPStatusCode(200, phrase: "OK")
+static let notFound = HTTPStatusCode(404, phrase: "Not Found")
+static let internalServerError = HTTPStatusCode(500, phrase: "Internal Server Error")
+```
+
+## Reading CI failures without a token
+
+Workflow logs need an authenticated API call. **Check run annotations do not**,
+on a public repo:
+
+```
+GET /repos/{owner}/{repo}/commits/{sha}/check-runs
+GET /repos/{owner}/{repo}/check-runs/{id}/annotations
+```
+
+So the iOS workflow greps its own build log on failure and re-emits each
+`error:` line as `::error::`, which turns it into an annotation. That is the
+channel compile errors come home through.
+
 ## Still unverified
 
 - Whether `LanguageModelSession()` compiles with no arguments at all. Apple's
   own example always passes `instructions:`.
-- Whether `HTTPHeaders` takes a dictionary literal, or whether
-  `[.contentType: "..."]` resolves to the deprecated `[HTTPHeader: String]`
-  overload. Worst case is a deprecation warning.
-- Everything about how the model actually behaves, as opposed to what it
+- Everything about how the model actually *behaves*, as opposed to what it
   compiles into.

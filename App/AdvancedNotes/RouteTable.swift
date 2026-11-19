@@ -64,8 +64,13 @@ final class RouteTable {
     }
 
     // MARK: - Helpers
+    //
+    // These are `nonisolated` because the route closures are `@Sendable` and
+    // therefore not on the main actor, while the class is. They touch no
+    // instance state — they encode a value or read a file out of the bundle —
+    // so there is nothing for the isolation to protect.
 
-    static func json(_ value: some Encodable) -> HTTPResponse {
+    nonisolated static func json(_ value: some Encodable) -> HTTPResponse {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let body = (try? encoder.encode(value)) ?? Data("{\"error\":\"encoding failed\"}".utf8)
@@ -76,7 +81,7 @@ final class RouteTable {
         )
     }
 
-    static func bundled(_ name: String, _ ext: String) -> HTTPResponse {
+    nonisolated static func bundled(_ name: String, _ ext: String) -> HTTPResponse {
         guard let url = Bundle.main.url(forResource: name, withExtension: ext),
               let data = try? Data(contentsOf: url) else {
             Log.routes.error("missing bundled resource \(name, privacy: .public).\(ext, privacy: .public)")
@@ -93,7 +98,7 @@ final class RouteTable {
         )
     }
 
-    static func contentType(for ext: String) -> String {
+    nonisolated static func contentType(for ext: String) -> String {
         switch ext {
         case "html": return "text/html; charset=utf-8"
         case "js": return "text/javascript; charset=utf-8"

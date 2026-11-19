@@ -17,9 +17,12 @@ final class Diagnostics {
     private var embedder: AppleEmbedder?
     private var lastProbes: Probes?
 
-    init(intelligence: Intelligence = Intelligence(), vault: VaultProbe = VaultProbe()) {
-        self.intelligence = intelligence
-        self.vault = vault
+    // Built in the body rather than as default arguments: a default argument
+    // expression is evaluated in a nonisolated context, so `Intelligence()`
+    // there is a call to a main-actor initializer from off the main actor.
+    init() {
+        self.intelligence = Intelligence()
+        self.vault = VaultProbe()
     }
 
     // MARK: - Report
