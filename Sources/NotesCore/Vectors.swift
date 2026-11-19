@@ -13,6 +13,11 @@ public enum Vectors {
     /// Returns 0 for a dimension mismatch rather than trapping, because a
     /// stale vector from a previous embedder revision is a thing that happens
     /// and must not crash capture.
+    ///
+    /// The result is only accurate to about 1e-7: the vectors are stored as
+    /// Float32, so identical vectors score 0.9999999 rather than exactly 1.0,
+    /// and a similarity can land a hair *above* 1.0. Never compare these to a
+    /// threshold more tightly than that, and never assume the range is closed.
     public static func cosine(_ a: [Float], _ b: [Float]) -> Double {
         guard a.count == b.count, !a.isEmpty else { return 0 }
         var sum: Double = 0

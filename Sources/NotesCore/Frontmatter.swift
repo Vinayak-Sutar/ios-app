@@ -134,22 +134,34 @@ public enum FrontmatterCodec {
     /// how a note hand-written in the Files app still reads.
     public static func parse(_ text: String) -> (Frontmatter, String) {
         var fm = Frontmatter()
-        let lines = text.components(separatedBy: "\n")
-        guard let first = lines.first, stripCR(first) == "---" else { return (fm, text) }
+
+        // Newlines are normalised FIRST, and this is not tidying up.
+        //
+        // Swift treats "\r\n" as a single grapheme cluster, so
+        // `components(separatedBy: "\n")` does not split a CRLF file at all —
+        // the entire frontmatter arrives as one "line", no closing `---` is
+        // found, and every note silently parses as a bodyless blob with a
+        // freshly generated id. The Windows app writes CRLF (Python's
+        // `write_text` translates on Windows), so that is not a hypothetical.
+        let normalised = text
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+
+        let lines = normalised.components(separatedBy: "\n")
+        guard let first = lines.first, first == "---" else { return (fm, normalised) }
 
         var closing: Int?
         var index = 1
         while index < lines.count {
-            if stripCR(lines[index]) == "---" {
+            if lines[index] == "---" {
                 closing = index
                 break
             }
             index += 1
         }
-        guard let end = closing else { return (fm, text) }
+        guard let end = closing else { return (fm, normalised) }
 
-        for line in lines[1..<end] {
-            let raw = stripCR(line)
+        for raw in lines[1..<end] {
             let trimmed = raw.trimmingCharacters(in: .whitespaces)
             if trimmed.isEmpty || trimmed.hasPrefix("#") { continue }
             guard let colon = raw.firstIndex(of: ":") else { continue }
@@ -164,7 +176,7 @@ public enum FrontmatterCodec {
             }
         }
 
-        let body = lines[(end + 1)...].map(stripCR).joined(separator: "\n")
+        let body = lines[(end + 1)...].joined(separator: "\n")
         return (fm, body)
     }
 
@@ -194,10 +206,6 @@ public enum FrontmatterCodec {
     }
 
     // MARK: - Helpers
-
-    static func stripCR(_ line: String) -> String {
-        line.hasSuffix("\r") ? String(line.dropLast()) : line
-    }
 
     static func trimTrailingWhitespace(_ text: String) -> String {
         var out = text

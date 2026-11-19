@@ -121,3 +121,25 @@ any note can be read straight off its frontmatter.
 
 To check the format really is portable, copy the vault into
 `D:\temp\mnemo\profiles\<id>\` and run `python -m mnemo rebuild`.
+
+## Running the tests on Windows
+
+Swift on Windows needs three things set up before it will do anything, and the
+error messages for each are misleading. `scripts\swift-env.bat` handles all of
+them:
+
+```
+scripts\swift-env.bat swift test
+```
+
+What it does, and why each is needed:
+
+| Setup | What happens without it |
+|---|---|
+| Adds the VS Installer directory to `PATH` | `vcvars64.bat` cannot find `vswhere.exe`, reports nothing, and sets nothing up |
+| Runs `vcvars64.bat` and sets `SDKROOT` | `error: unable to load standard library for target 'x86_64-unknown-windows-msvc'` |
+| Puts the Swift **Runtimes** directory on `PATH` | SwiftPM compiles `Package.swift` and then cannot run it: `Missing or empty JSON output from manifest compilation` |
+
+Tested with Swift 6.4.2 and Visual Studio Build Tools 2022. The build prints
+`wchar_t` modularization warnings from the Windows SDK's own `.swiftmodule`;
+they come from the toolchain, not from this code.

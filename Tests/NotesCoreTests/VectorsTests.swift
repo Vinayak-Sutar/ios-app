@@ -5,19 +5,19 @@ final class VectorsTests: XCTestCase {
 
     func testCosineOfIdenticalNormalisedVectorsIsOne() {
         let v = Vectors.l2Normalise([1, 2, 3, 4])
-        XCTAssertEqual(Vectors.cosine(v, v), 1.0, accuracy: 1e-9)
+        XCTAssertEqual(Vectors.cosine(v, v), 1.0, accuracy: 1e-6)
     }
 
     func testCosineOfOrthogonalVectorsIsZero() {
         let a = Vectors.l2Normalise([1, 0])
         let b = Vectors.l2Normalise([0, 1])
-        XCTAssertEqual(Vectors.cosine(a, b), 0.0, accuracy: 1e-9)
+        XCTAssertEqual(Vectors.cosine(a, b), 0.0, accuracy: 1e-6)
     }
 
     func testCosineOfOppositeVectorsIsMinusOne() {
         let a = Vectors.l2Normalise([1, 1])
         let b = Vectors.l2Normalise([-1, -1])
-        XCTAssertEqual(Vectors.cosine(a, b), -1.0, accuracy: 1e-9)
+        XCTAssertEqual(Vectors.cosine(a, b), -1.0, accuracy: 1e-6)
     }
 
     /// A vector left over from a previous embedder revision has a different
@@ -40,7 +40,7 @@ final class VectorsTests: XCTestCase {
     func testMeanIsNormalisedAndIgnoresMismatchedVectors() {
         let mean = Vectors.mean([[1, 0], [0, 1], [1, 2, 3]])
         XCTAssertEqual(mean.count, 2)
-        XCTAssertEqual(Vectors.cosine(mean, mean), 1.0, accuracy: 1e-9)
+        XCTAssertEqual(Vectors.cosine(mean, mean), 1.0, accuracy: 1e-6)
         XCTAssertEqual(Double(mean[0]), Double(mean[1]), accuracy: 1e-6)
     }
 
@@ -67,7 +67,7 @@ final class VectorsTests: XCTestCase {
     func testFoldIntoEmptyCentroidAdoptsTheMember() {
         let newcomer = Vectors.l2Normalise([0, 3, 4])
         let folded = Vectors.foldIntoCentroid([], count: 0, adding: newcomer)
-        XCTAssertEqual(Vectors.cosine(folded, newcomer), 1.0, accuracy: 1e-9)
+        XCTAssertEqual(Vectors.cosine(folded, newcomer), 1.0, accuracy: 1e-6)
     }
 
     /// A large collection should barely move for one new note; a small one
@@ -115,7 +115,7 @@ final class VectorsTests: XCTestCase {
         let v = Vectors.l2Normalise((0..<512).map { Float($0 % 7) - 3 })
         let decoded = Vectors.decodeBase64(Vectors.encodeBase64(v))
         XCTAssertEqual(decoded.count, 512)
-        XCTAssertEqual(Vectors.cosine(v, decoded), 1.0, accuracy: 1e-9)
+        XCTAssertEqual(Vectors.cosine(v, decoded), 1.0, accuracy: 1e-6)
     }
 
     func testDecodingGarbageYieldsEmptyRatherThanCrashing() {

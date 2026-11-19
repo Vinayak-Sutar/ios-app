@@ -57,8 +57,13 @@ final class GoldenVaultTests: XCTestCase {
 
     /// Re-rendering a note the Python app wrote must produce the same bytes.
     /// Any drift here means the iOS app would rewrite every file it touched,
-    /// which would turn a sync or a diff into noise.
-    func testReRenderingIsByteIdenticalToWhatPythonWrote() throws {
+    /// turning a diff between the two vaults into noise.
+    ///
+    /// Newlines are normalised first, and that is not a fudge: the Python app
+    /// writes these through `Path.write_text`, which on Windows translates to
+    /// CRLF, while this writes raw UTF-8 and so always emits LF. Both sides
+    /// read either form, so the content is what has to match.
+    func testReRenderingMatchesWhatPythonWrote() throws {
         let files = Self.markdownFiles()
         try XCTSkipIf(files.isEmpty, "no fixtures")
 

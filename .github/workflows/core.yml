@@ -63,7 +63,7 @@ jobs:
           # Swift's Hasher is seeded per process, so anything persisted that
           # depends on it changes meaning on every launch -- the same trap
           # Python's hash() set in the original app.
-          if grep -rnE '\b(Hasher\(|\.hashValue)\b' Sources/NotesCore; then
+          if grep -rnE '(Hasher\(|\.hashValue)' Sources/NotesCore; then
             echo "::error::use a stable hash in NotesCore, not Hasher/hashValue"
             fail=1
           fi

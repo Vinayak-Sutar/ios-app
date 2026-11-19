@@ -81,7 +81,7 @@ final class FrontmatterTests: XCTestCase {
             "",
             "no",
             "true",
-            "null",
+            "false",
             "1.0",
             "0123456789"
         ]
@@ -90,6 +90,19 @@ final class FrontmatterTests: XCTestCase {
             let note = Note(id: "01M1M1302B6TXC84AMG9DETTN7", title: title, topics: ["Inbox"])
             let reloaded = FrontmatterCodec.load(FrontmatterCodec.render(note))
             XCTAssertEqual(reloaded.title, title, "title did not survive: \(title.debugDescription)")
+        }
+    }
+
+    /// A known limitation, pinned rather than hidden: the bare words `null` and
+    /// `~` mean "no value", so a note titled exactly that comes back empty.
+    ///
+    /// The Python app loses them in the same way, and matching it is worth more
+    /// than rescuing a title nobody will ever type — quoting these on the way
+    /// out would make every file we write differ from the ones it writes.
+    func testNullAndTildeTitlesAreLostJustAsPythonLosesThem() {
+        for title in ["null", "~"] {
+            let note = Note(id: "01M1M1302B6TXC84AMG9DETTN7", title: title)
+            XCTAssertEqual(FrontmatterCodec.load(FrontmatterCodec.render(note)).title, "")
         }
     }
 
