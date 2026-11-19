@@ -108,3 +108,21 @@ test can read yet.
   `Transfer-Encoding: chunked`, one event per line. That streaming requirement
   is the main reason the bridge is a real HTTP server rather than a
   `WKURLSchemeHandler`.
+
+## Recorded shapes
+
+`Tests/NotesCoreTests/Golden/api/*.json` holds real responses captured from
+`python -m mnemo serve` against a copy of `samples/demo-vault`, so the bridge
+is written against observed JSON rather than a guess. It already paid for
+itself: `/api/graph` returns `{links, nodes}`, not the `{nodes, edges}` guessed
+above.
+
+`state.json` is the shell contract and the one to match first. The rest were
+captured against a freshly indexed vault, so they are empty — which is exactly
+what the M1 stubs need, since an empty response is the shape the page's empty
+states render from.
+
+Two fields in `state.json` are worth noting. `laptop: true` keeps the page out
+of its offline-copy path, which a standalone app always wants. `coldStart: 20`
+is the countdown shown in the sidebar while the vault is too new to grow a
+taxonomy. Both are ours to fake honestly rather than compute.

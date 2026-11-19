@@ -1,0 +1,22 @@
+{
+  "coldStart": 20,
+  "embedder": "ollama:nomic-embed-text",
+  "embedderChanged": null,
+  "inbox": 0,
+  "laptop": true,
+  "notes": 0,
+  "paths": {
+    "host": "http://127.0.0.1:11434",
+    "models": "D:\\temp\\mnemo\\vendor\\models",
+    "ollama": "D:\\temp\\mnemo\\vendor\\ollama\\ollama.exe",
+    "repo": "D:\\temp\\mnemo",
+    "vault": "C:\\Users\\VINAYAK\\AppData\\Local\\Temp\\claude\\11e8d088bd9070fc\\d53e0b24-9d84-4af7-8be2-d71d35c8f450\\scratchpad\\golden-vault",
+    "vendor": "D:\\temp\\mnemo\\vendor"
+  },
+  "profile": "ollama-nomic",
+  "review": 0,
+  "router": "ollama:gemma4:e4b",
+  "topics": 0,
+  "tree": [],
+  "vault": "C:\\Users\\VINAYAK\\AppData\\Local\\Temp\\claude\\11e8d088bd9070fc\\d53e0b24-9d84-4af7-8be2-d71d35c8f450\\scratchpad\\golden-vault"
+}
