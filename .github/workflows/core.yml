@@ -14,16 +14,12 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test:
-    name: NotesCore (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        # Windows is the developer's own machine, so it is the one that has to
-        # work. Linux is a free second opinion that catches anything we have
-        # accidentally made platform-specific.
-        os: [windows-latest, ubuntu-latest]
+  # Windows is the developer's own machine, so this is the job that has to
+  # work. Pinned a version behind the local toolchain (6.4.2) on purpose:
+  # if the code only builds on the newest compiler, that is worth knowing.
+  windows:
+    name: NotesCore (Windows)
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -37,6 +33,23 @@ jobs:
 
       - name: Build
         run: swift build
+
+      - name: Test
+        run: swift test
+
+  # A free second opinion that catches anything accidentally made
+  # platform-specific. Runs in the official image rather than through an
+  # installer action: the action left no `swift` on PATH here and the job
+  # failed with a bare exit 127, which says nothing.
+  linux:
+    name: NotesCore (Linux)
+    runs-on: ubuntu-latest
+    container: swift:6.4.2
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain version
+        run: swift --version
 
       - name: Test
         run: swift test

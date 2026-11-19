@@ -110,6 +110,22 @@ week one than in week eight.
 `Run probes` also exercises one real model round trip, and `Logs` reads the
 app's own `OSLog` output back out of the process.
 
+## Reading a failed CI build
+
+Workflow logs need an authenticated API call. **Check run annotations do not**,
+on a public repo — so the iOS workflow greps its own build log on failure and
+re-emits every `error:` line as `::error::`, which turns it into an annotation.
+That is how compile errors get back to a machine with no Mac and no token:
+
+```bash
+curl -s "https://api.github.com/repos/Vinayak-Sutar/ios-app/commits/$(git rev-parse HEAD)/check-runs"
+```
+
+Take the failing check's `annotations_url` and fetch it. Use `curl`, not
+Python's `urllib` — this machine's Python cannot verify GitHub's certificate
+chain, which is the same Windows trust-store problem the Python app works
+around in `enrich.py`.
+
 ## Notes on the vault
 
 Notes are `Documents/Vault/<Collection>/<slug>.md` with the same frontmatter the
@@ -140,6 +156,8 @@ What it does, and why each is needed:
 | Runs `vcvars64.bat` and sets `SDKROOT` | `error: unable to load standard library for target 'x86_64-unknown-windows-msvc'` |
 | Puts the Swift **Runtimes** directory on `PATH` | SwiftPM compiles `Package.swift` and then cannot run it: `Missing or empty JSON output from manifest compilation` |
 
-Tested with Swift 6.4.2 and Visual Studio Build Tools 2022. The build prints
+Tested with Swift 6.4.2 locally and Visual Studio Build Tools 2022. CI builds
+NotesCore on Windows with 6.2 and on Linux with 6.4.2 — deliberately two
+versions, so a dependency on the newest compiler shows up. The build prints
 `wchar_t` modularization warnings from the Windows SDK's own `.swiftmodule`;
 they come from the toolchain, not from this code.
