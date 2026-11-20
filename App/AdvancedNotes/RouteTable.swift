@@ -532,9 +532,7 @@ final class RouteTable {
         HTTPResponse(
             statusCode: .ok,
             headers: [.contentType: "application/x-ndjson; charset=utf-8"],
-            body: Data((lines.joined(separator: "
-") + "
-").utf8)
+            body: Data((lines.joined(separator: "\n") + "\n").utf8)
         )
     }
 
