@@ -543,8 +543,7 @@ final class RouteTable {
             guard var entry = await vault.entry(id), !text.isEmpty else {
                 return Respond.failure("id and text required", status: .badRequest)
             }
-            entry.note.body = entry.note.body.isEmpty ? text : entry.note.body + "
-" + text
+            entry.note.body = entry.note.body.isEmpty ? text : entry.note.body + "\n" + text
             entry.note.updated = Timestamp.utcNow()
             let vector = await embedding.embed(entry.note.embeddingText)
             let path = (try? await vault.save(
