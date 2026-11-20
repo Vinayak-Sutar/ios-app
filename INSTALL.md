@@ -5,7 +5,7 @@ No paid Apple Developer account, so there is no TestFlight. CI builds an
 installs it over USB.
 
 **The signature lasts 7 days.** After that the app refuses to launch and you
-repeat steps 4–7. Takes about two minutes once set up.
+repeat step 4 (Developer Mode and the trust survive). Takes about two minutes once set up.
 
 ## One-time setup
 
@@ -37,14 +37,25 @@ press **Start**.
   burns another of the 10 App IDs a free account gets per 7 days.
 - A free account allows **3 sideloaded apps** at once.
 
-**5. Trust the certificate.** On the phone: **Settings ▸ General ▸ VPN &
+**5. Turn on Developer Mode** — first install only, and it needs a restart.
+
+**Settings ▸ Privacy & Security** → scroll to the bottom → **Developer Mode**
+→ on. The phone asks to restart; after it comes back and you unlock it, a
+prompt appears — **Turn On**, then your passcode.
+
+iOS requires this for any app signed with a development certificate, which is
+what a free Apple ID produces. Without it the app is installed but refuses to
+launch, saying Developer Mode is required. The toggle only appears once a
+development-signed app is present, so it will not be there before step 4.
+
+**6. Trust the certificate.** On the phone: **Settings ▸ General ▸ VPN &
 Device Management** → your Apple ID → **Trust**. Needed once per certificate,
 so usually only the first time.
 
-**6. Launch it.** Allow notifications when asked — reminders need it, and it
+**7. Launch it.** Allow notifications when asked — reminders need it, and it
 is the one capability a free account still gets (push would not be).
 
-**7. Lower the cold start, first time only.** Close the app, then
+**8. Lower the cold start, first time only.** Close the app, then
 **Files ▸ On My iPhone ▸ Advanced Notes ▸ _dev ▸ overrides.json** and set:
 
 ```json
@@ -83,8 +94,8 @@ Nothing in this app has ever run, so expect something.
 | Sideloadly refuses or errors | The known risk. Its maintainers claim iOS 27 works, independent reports conflict. Fallbacks: [SideStore](https://sidestore.io), LiveContainer, or paying the $99 |
 | Blank white screen | The server did not come up, or `app.html` choked on a response. The **diag** button is native and should still work — that alone narrows it a lot |
 | "Could not start" with a message | The server failed; the message is the reason, and it is selectable so you can send it |
-| Everything lands in Inbox | Either step 7 was skipped, or the embeddings genuinely do not separate. The diag page distinguishes these |
-| Works, then dies after a week | Normal. The signature expired; redo steps 4–7 |
+| Everything lands in Inbox | Either step 8 was skipped, or the embeddings genuinely do not separate. The diag page distinguishes these |
+| Works, then dies after a week | Normal. The signature expired; redo step 4 |
 
 On the diagnostics page, **Logs** dumps the app's own `OSLog` output. Paste
 that and it is usually enough to work from.
