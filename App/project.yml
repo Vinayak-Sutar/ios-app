@@ -58,11 +58,22 @@ targets:
         # is how the frontmatter the app writes gets inspected.
         UIFileSharingEnabled: true
         LSSupportsOpeningDocumentsInPlace: true
-        # The UI is served by an in-process HTTP server on loopback. ATS would
-        # otherwise block the plain-HTTP load; this is the narrowest exception
-        # that allows it.
+        # The UI is served by an in-process HTTP server on loopback.
+        #
+        # NSAllowsLocalNetworking on its own is documented to cover .local and
+        # link-local names; whether it reliably covers a literal 127.0.0.1 in
+        # WKWebView is exactly the kind of thing that fails silently as a blank
+        # page. So the loopback address is also named explicitly. Both are far
+        # narrower than NSAllowsArbitraryLoads, which would disable ATS wholesale.
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
+          NSExceptionDomains:
+            127.0.0.1:
+              NSExceptionAllowsInsecureHTTPLoads: true
+              NSIncludesSubdomains: false
+            localhost:
+              NSExceptionAllowsInsecureHTTPLoads: true
+              NSIncludesSubdomains: false
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: app.advancednotes.app

@@ -34,7 +34,8 @@ struct RootView: View {
             case let .ready(url):
                 WebView(
                     url: url.appendingPathComponent(host.page.path),
-                    reloadToken: host.reloadToken
+                    reloadToken: host.reloadToken,
+                    host: host
                 )
                 .ignoresSafeArea()
 
@@ -44,19 +45,24 @@ struct RootView: View {
                 // corner the page keeps clear.
                 VStack {
                     Spacer()
-                    HStack {
+                    HStack(spacing: 8) {
                         Spacer()
                         Button(host.page == .app ? "diag" : "notes") {
                             host.togglePage()
                         }
-                        .font(.caption2.weight(.semibold))
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(.thinMaterial, in: Capsule())
-                        .opacity(0.65)
-                        .padding(.trailing, 10)
-                        .padding(.bottom, 2)
+                        .modifier(CapsuleChip())
+                        Button("native") { host.showNativePanel = true }
+                            .modifier(CapsuleChip())
                     }
+                    .padding(.trailing, 10)
+                    .padding(.bottom, 2)
+                }
+
+                // When the web view cannot load, every instrument in this app
+                // is unreachable, because they all live inside it. This panel
+                // is drawn natively for exactly that case.
+                if host.showNativePanel {
+                    NativePanel(host: host)
                 }
 
             case let .failed(message):
@@ -81,6 +87,78 @@ struct RootView: View {
     }
 }
 
+private struct CapsuleChip: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .font(.caption2.weight(.semibold))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(.thinMaterial, in: Capsule())
+            .opacity(0.65)
+    }
+}
+
+/// Diagnostics drawn in SwiftUI, not in the web view.
+///
+/// Everything else this app can tell you about itself is served over HTTP and
+/// rendered as a web page — which is useless precisely when the web view is
+/// the thing that is broken. On the first device launch that was the actual
+/// failure: a blank screen with no way to ask why.
+///
+/// It opens by itself if the page has not loaded within a few seconds.
+struct NativePanel: View {
+    @ObservedObject var host: WebHost
+    @State private var lines: [String] = []
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("Diagnostics").font(.headline)
+                Spacer()
+                Button("Close") { host.showNativePanel = false }
+            }
+            .padding()
+
+            Divider()
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 10) {
+                    field("Server", host.serverSummary)
+                    field("URL", host.currentURL?.absoluteString ?? "none")
+                    field("Web view", host.webViewStatus)
+                    field("Model", Intelligence.availability.describe)
+                    field("Embedder", host.embedderSummary)
+
+                    Text("Log").font(.subheadline.weight(.semibold)).padding(.top, 6)
+                    Text(lines.isEmpty ? "(empty)" : lines.joined(separator: "\n"))
+                        .font(.system(size: 11, design: .monospaced))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .padding()
+            }
+
+            Divider()
+            HStack {
+                Button("Refresh") { lines = Log.recentEntries(limit: 120) }
+                Spacer()
+                Button("Reload page") { host.reload() }
+            }
+            .padding()
+        }
+        .background(Color(UIColor.systemBackground))
+        .onAppear { lines = Log.recentEntries(limit: 120) }
+    }
+
+    private func field(_ name: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(name).font(.caption).foregroundStyle(.secondary)
+            Text(value).font(.callout.monospaced()).textSelection(.enabled)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
 /// Owns the server's lifetime and tells the web view when to reload.
 @MainActor
 final class WebHost: ObservableObject {
@@ -101,6 +179,14 @@ final class WebHost: ObservableObject {
 
     @Published private(set) var page: Page = .app
     @Published private(set) var phase: Phase = .starting
+
+    /// Shown when the web view cannot load, automatically or on demand.
+    @Published var showNativePanel = false
+    @Published private(set) var webViewStatus = "not started"
+    @Published private(set) var serverSummary = "not started"
+    @Published private(set) var embedderSummary = "not prepared"
+    private(set) var currentURL: URL?
+    private var watchdog: Task<Void, Never>?
     /// Bumped whenever the page needs reloading — after a cold start and after
     /// every return to the foreground, because the listening socket does not
     /// survive suspension.
@@ -122,7 +208,42 @@ final class WebHost: ObservableObject {
 
     func togglePage() {
         page = (page == .app) ? .diag : .app
+        reload()
+    }
+
+    func reload() {
         reloadToken += 1
+        webViewStatus = "loading"
+        startWatchdog()
+    }
+
+    /// If nothing has loaded in a few seconds, open the native panel.
+    ///
+    /// A web view that silently loads nothing is the worst case here, because
+    /// it produces no error to report and leaves no way to ask. This turns
+    /// that silence into a screen.
+    private func startWatchdog() {
+        watchdog?.cancel()
+        watchdog = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 6_000_000_000)
+            guard let self, !Task.isCancelled else { return }
+            if self.webViewStatus != "loaded" {
+                Log.routes.error("page did not load within 6s; opening the native panel")
+                self.showNativePanel = true
+            }
+        }
+    }
+
+    func webViewDidFinish(_ url: URL?) {
+        watchdog?.cancel()
+        webViewStatus = "loaded"
+        currentURL = url
+    }
+
+    func webViewDidFail(_ message: String) {
+        watchdog?.cancel()
+        webViewStatus = "failed: " + message
+        showNativePanel = true
     }
 
     func start() {
@@ -182,6 +303,7 @@ final class WebHost: ObservableObject {
 
             Task {
                 await embedding.prepare()
+                embedderSummary = embedding.failure ?? embedding.identifier
                 let base = Thresholds.appleGuess(embedderID: embedding.identifier)
                 let (merged, rejected) = overrides.apply(to: base)
                 capture.thresholds = merged
@@ -200,8 +322,10 @@ final class WebHost: ObservableObject {
             }
 
             let snapshot = await server.snapshot()
+            serverSummary = "\(snapshot.state) on 127.0.0.1:\(await server.port), restarts \(snapshot.restarts)"
             if snapshot.state == .listening {
                 phase = .ready(await server.baseURL)
+                reload()
             } else {
                 phase = .failed(snapshot.lastError ?? "the local server never started listening")
                 started = false
@@ -239,6 +363,7 @@ final class WebHost: ObservableObject {
 struct WebView: UIViewRepresentable {
     let url: URL
     let reloadToken: Int
+    let host: WebHost
 
     func makeUIView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
@@ -265,7 +390,7 @@ struct WebView: UIViewRepresentable {
         webView.load(URLRequest(url: url))
     }
 
-    func makeCoordinator() -> Coordinator { Coordinator() }
+    func makeCoordinator() -> Coordinator { Coordinator(host: host) }
 
     /// Reports what the web view actually did.
     ///
@@ -275,9 +400,13 @@ struct WebView: UIViewRepresentable {
     /// log has to distinguish them.
     final class Coordinator: NSObject, WKNavigationDelegate {
         var loadedToken = -1
+        let host: WebHost
+
+        init(host: WebHost) { self.host = host }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             Log.routes.notice("web view loaded \(webView.url?.absoluteString ?? "?", privacy: .public)")
+            MainActor.assumeIsolated { host.webViewDidFinish(webView.url) }
         }
 
         func webView(
@@ -288,10 +417,12 @@ struct WebView: UIViewRepresentable {
             // "Provisional" means it never even started loading — a refused
             // connection or a blocked request, not a page that failed later.
             Log.routes.error("web view could not start loading: \(error.localizedDescription, privacy: .public)")
+            MainActor.assumeIsolated { host.webViewDidFail(error.localizedDescription) }
         }
 
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
             Log.routes.error("web view failed mid-load: \(error.localizedDescription, privacy: .public)")
+            MainActor.assumeIsolated { host.webViewDidFail(error.localizedDescription) }
         }
 
         func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
