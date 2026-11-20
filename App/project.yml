@@ -40,6 +40,10 @@ targets:
         product: NotesCore
       - package: FlyingFox
         product: FlyingFox
+      # FlyingFox imports this but does not re-export it, and the IPv4 socket
+      # address factories are in here.
+      - package: FlyingFox
+        product: FlyingSocks
     info:
       path: AdvancedNotes/Info.plist
       properties:

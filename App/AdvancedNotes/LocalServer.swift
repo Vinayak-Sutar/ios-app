@@ -1,4 +1,6 @@
 import FlyingFox
+// Not re-exported by FlyingFox, and the IPv4 address factories live here.
+import FlyingSocks
 import Foundation
 
 /// A real HTTP server, bound to loopback, inside the app.
@@ -36,9 +38,26 @@ actor LocalServer {
 
     init(port: UInt16 = 8787) {
         self.port = port
-        // Loopback, not any-interface: nothing about this app should be
-        // reachable from the network, and binding explicitly says so.
-        self.server = HTTPServer(address: .loopback(port: port))
+        // IPv4 loopback, explicitly.
+        //
+        // FlyingFox's `.loopback(port:)` is declared on `sockaddr_in6`, so it
+        // binds `::1` and nothing else. The web view dials `127.0.0.1`, which
+        // is IPv4 — so the bind succeeded, `waitUntilListening()` returned,
+        // the app reported itself healthy, and every request was refused.
+        // That presented as a blank page with the server insisting it was
+        // listening.
+        //
+        // Still loopback rather than any-interface: nothing here should be
+        // reachable from the network, and binding says so rather than trusting
+        // a check later.
+        // No fallback on purpose. The obvious one, `.inet(port:)`, is
+        // INADDR_ANY — every interface — which would quietly put the notes on
+        // the Wi-Fi. A dotted quad literal cannot fail to parse, so a trap
+        // here is unreachable and preferable to that.
+        guard let address = try? sockaddr_in.inet(ip4: "127.0.0.1", port: port) else {
+            preconditionFailure("127.0.0.1 did not parse as an IPv4 address")
+        }
+        self.server = HTTPServer(address: address)
     }
 
     var baseURL: URL {
