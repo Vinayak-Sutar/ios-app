@@ -79,8 +79,8 @@ final class RouteTable {
             Self.json(API.Profiles(profiles: [], current: nil))
         }
 
-        await server.appendRoute("GET /api/state") { [vault, embedding] _ in
-            await Self.json(Self.state(vault: vault, embedding: embedding))
+        await server.appendRoute("GET /api/state") { [vault, embedding, capture] _ in
+            await Self.json(Self.state(vault: vault, embedding: embedding, capture: capture))
         }
 
         await server.appendRoute("GET /api/agenda") { [vault] _ in
@@ -102,7 +102,7 @@ final class RouteTable {
     }
 
     @MainActor
-    private static func state(vault: Vault, embedding: EmbedderBox) -> API.State {
+    private static func state(vault: Vault, embedding: EmbedderBox, capture: Capture) -> API.State {
         var nodes: [API.TopicNode] = []
         for path in vault.collectionPaths {
             let members = vault.notes(topic: path)
@@ -122,7 +122,7 @@ final class RouteTable {
             ))
         }
 
-        let coldStart = max(0, Capture.coldStartNotes - vault.entries.count)
+        let coldStart = max(0, capture.coldStartNotes - vault.entries.count)
         return API.State(
             tree: nodes,
             inbox: vault.inbox.count,

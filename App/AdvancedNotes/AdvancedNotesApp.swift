@@ -125,9 +125,19 @@ final class WebHost: ObservableObject {
             await server.install(routes)
             await server.start()
 
+            DevOverrides.writeTemplateIfMissing(in: vault.root)
+            let (overrides, _) = DevOverrides.load()
+            if let coldStart = overrides.coldStartNotes { capture.coldStartNotes = coldStart }
+            if let retrievalOnly = overrides.retrievalOnly { capture.retrievalOnly = retrievalOnly }
+
             Task {
                 await embedding.prepare()
-                capture.thresholds = Thresholds.appleGuess(embedderID: embedding.identifier)
+                let base = Thresholds.appleGuess(embedderID: embedding.identifier)
+                let (merged, rejected) = overrides.apply(to: base)
+                capture.thresholds = merged
+                for note in rejected {
+                    Log.vault.error("override ignored: \(note, privacy: .public)")
+                }
                 vault.reload(using: embedding.embedder)
             }
 

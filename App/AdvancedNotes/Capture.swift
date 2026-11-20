@@ -23,7 +23,16 @@ final class Capture {
     /// would each invent a collection from their own incidental wording. The
     /// Python app clusters at 20; here they simply queue in Inbox until there
     /// is something to compare against.
-    static let coldStartNotes = 20
+    static let defaultColdStartNotes = 20
+
+    /// Overridable from `_dev/overrides.json`, so filing can be reached in one
+    /// sitting without typing twenty notes.
+    var coldStartNotes = Capture.defaultColdStartNotes
+
+    /// File on similarity alone, never asking the model. Separates two
+    /// questions that otherwise arrive together: whether the embeddings
+    /// cluster, and whether the model picks well from them.
+    var retrievalOnly = false
 
     init(vault: Vault, intelligence: Intelligence, embedding: EmbedderBox, thresholds: Thresholds) {
         self.vault = vault
@@ -62,7 +71,7 @@ final class Capture {
 
         // 3. Retrieve. Rank by similarity to each collection's centroid.
         let candidates = vault.candidates(for: vector, limit: thresholds.topicCandidates)
-        let coldStart = max(0, Self.coldStartNotes - vault.entries.count)
+        let coldStart = max(0, coldStartNotes - vault.entries.count)
 
         var decision: Decision
         if coldStart > 0 {
@@ -70,6 +79,8 @@ final class Capture {
                 reason: "still learning your collections (\(coldStart) more notes)",
                 usedModel: false
             )
+        } else if retrievalOnly {
+            decision = Router.decideFromRetrieval(candidates, thresholds)
         } else if Router.retrievalIsConfident(candidates, thresholds) {
             // Retrieval alone measured 40/40 against a 4B model's 34/40, and
             // every deviation from its rank-1 was a mistake. So when it is
