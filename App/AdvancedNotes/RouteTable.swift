@@ -46,6 +46,7 @@ final class RouteTable {
     }
 
     func install(on server: HTTPServer) async {
+        await installRequestLog(on: server)
         await installPages(on: server)
         await installState(on: server)
         await installNotes(on: server)
@@ -61,6 +62,27 @@ final class RouteTable {
         await server.appendRoute("POST *") { request in
             Log.routes.notice("unhandled POST \(request.path, privacy: .public)")
             return Respond.json(API.Failure(error: "not found"), status: .notFound)
+        }
+    }
+
+    // MARK: - Request log
+
+    /// Log every request, then decline it so the real route handles it.
+    ///
+    /// FlyingFox tries routes in order and moves to the next one when a
+    /// handler throws `HTTPUnhandledError`, which makes a first catch-all an
+    /// effective middleware hook. Installed before everything else, so the
+    /// diagnostics page's log becomes a full request trace.
+    ///
+    /// Worth the noise: with no debugger and no web inspector, "which URLs did
+    /// the page actually ask for, and in what order" is otherwise unknowable —
+    /// and a blank screen is exactly the failure where that is the question.
+    private func installRequestLog(on server: HTTPServer) async {
+        for method in ["GET", "POST"] {
+            await server.appendRoute(HTTPRoute("\(method) *")) { request in
+                Log.routes.notice("\(method, privacy: .public) \(request.path, privacy: .public)")
+                throw HTTPUnhandledError()
+            }
         }
     }
 

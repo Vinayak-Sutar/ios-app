@@ -37,6 +37,9 @@ final class Diagnostics {
         var storage: StorageInfo
         var thresholds: Thresholds
         var probes: Probes?
+        /// What the build actually put in the bundle. A missing app.html is a
+        /// plausible cause of a blank screen, and this says so outright.
+        var bundle: [String]
         var generatedAt: String
     }
 
@@ -127,6 +130,7 @@ final class Diagnostics {
             storage: vault.info(),
             thresholds: Thresholds.appleGuess(embedderID: embedder?.embedderID ?? "unknown"),
             probes: lastProbes,
+            bundle: Respond.bundleListing(),
             generatedAt: Timestamp.utcNow()
         )
     }

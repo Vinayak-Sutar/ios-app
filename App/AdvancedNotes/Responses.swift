@@ -74,16 +74,51 @@ enum Respond {
         guard let url = Bundle.main.url(forResource: name, withExtension: ext),
               let data = try? Data(contentsOf: url) else {
             Log.routes.error("missing bundled resource \(name, privacy: .public).\(ext, privacy: .public)")
+            // Answer with a readable HTML page listing what IS in the bundle.
+            // A missing resource is a plausible cause of a blank screen, and
+            // the difference between "not bundled" and "bundled in a
+            // subdirectory" decides the fix — so say which.
+            let listing = bundleListing()
+                .map { "<li><code>\($0)</code></li>" }
+                .joined()
+            let html = """
+                <!doctype html><meta charset="utf-8">
+                <meta name="viewport" content="width=device-width,initial-scale=1">
+                <body style="font:15px -apple-system,system-ui;padding:20px;line-height:1.5">
+                <h2>\(name).\(ext) is not in the app bundle</h2>
+                <p>The build did not include it, or included it inside a folder
+                reference rather than at the top level.</p>
+                <h3>What the bundle does contain</h3>
+                <ul>\(listing)</ul>
+                </body>
+                """
             return HTTPResponse(
                 statusCode: .internalServerError,
-                headers: [.contentType: "text/plain; charset=utf-8"],
-                body: Data("missing \(name).\(ext) in the app bundle".utf8)
+                headers: [.contentType: "text/html; charset=utf-8"],
+                body: Data(html.utf8)
             )
         }
         var headers: HTTPHeaders = [.contentType: contentType(for: ext)]
         // The page looks for this header on itself.
         if ext == "html" { headers[HTTPHeader("X-Notes-App")] = "1" }
         return HTTPResponse(statusCode: .ok, headers: headers, body: data)
+    }
+
+    /// Everything at the top level of the bundle, plus one level inside a
+    /// `Resources` folder if the build happened to nest them there.
+    static func bundleListing() -> [String] {
+        guard let root = Bundle.main.resourceURL else { return ["(no resource URL)"] }
+        let manager = FileManager.default
+        var out: [String] = []
+        for url in (try? manager.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)) ?? [] {
+            out.append(url.lastPathComponent)
+            if url.hasDirectoryPath, url.lastPathComponent.lowercased().contains("resource") {
+                for inner in (try? manager.contentsOfDirectory(at: url, includingPropertiesForKeys: nil)) ?? [] {
+                    out.append(url.lastPathComponent + "/" + inner.lastPathComponent)
+                }
+            }
+        }
+        return out.sorted()
     }
 
     static func contentType(for ext: String) -> String {

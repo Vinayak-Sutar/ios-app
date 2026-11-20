@@ -168,6 +168,10 @@ function render(d) {
     html.push(card('Probes', [row('', '<span class="k">Not run yet. Tap Run probes.</span>')]));
   }
 
+  if (d.bundle) {
+    html.push(card('In the app bundle', d.bundle.map(f => row('', '<span class="v mono">' + esc(f) + '</span>'))));
+  }
+
   const t = d.thresholds;
   html.push(card('Thresholds in use', [
     row('file floor', num(t.fileFloor, 2)),
