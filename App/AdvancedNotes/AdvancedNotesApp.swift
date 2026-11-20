@@ -32,8 +32,32 @@ struct RootView: View {
                 ProgressView("Starting…")
 
             case let .ready(url):
-                WebView(url: url, reloadToken: host.reloadToken)
-                    .ignoresSafeArea()
+                WebView(
+                    url: url.appendingPathComponent(host.page.path),
+                    reloadToken: host.reloadToken
+                )
+                .ignoresSafeArea()
+
+                // The diagnostics page is served at /diag, but a WKWebView has
+                // no address bar, so without this it is unreachable — and it
+                // is the only instrument this app has. Small and quiet, in the
+                // corner the page keeps clear.
+                VStack {
+                    Spacer()
+                    HStack {
+                        Spacer()
+                        Button(host.page == .app ? "diag" : "notes") {
+                            host.togglePage()
+                        }
+                        .font(.caption2.weight(.semibold))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(.thinMaterial, in: Capsule())
+                        .opacity(0.65)
+                        .padding(.trailing, 10)
+                        .padding(.bottom, 2)
+                    }
+                }
 
             case let .failed(message):
                 // Without a debugger a silent failure is undiagnosable, so the
@@ -67,6 +91,15 @@ final class WebHost: ObservableObject {
         case failed(String)
     }
 
+    /// Which page the web view shows. The app itself, or the diagnostics page.
+    enum Page: Equatable {
+        case app
+        case diag
+
+        var path: String { self == .app ? "" : "diag" }
+    }
+
+    @Published private(set) var page: Page = .app
     @Published private(set) var phase: Phase = .starting
     /// Bumped whenever the page needs reloading — after a cold start and after
     /// every return to the foreground, because the listening socket does not
@@ -84,6 +117,11 @@ final class WebHost: ObservableObject {
     private var embedding: EmbedderBox?
     private var capture: Capture?
     private var diagnostics: Diagnostics?
+
+    func togglePage() {
+        page = (page == .app) ? .diag : .app
+        reloadToken += 1
+    }
 
     func start() {
         guard !started else { return }
