@@ -126,3 +126,51 @@ Two fields in `state.json` are worth noting. `laptop: true` keeps the page out
 of its offline-copy path, which a standalone app always wants. `coldStart: 20`
 is the countdown shown in the sidebar while the vault is too new to grow a
 taxonomy. Both are ours to fake honestly rather than compute.
+
+
+## Implemented as of M2
+
+Serving the real `app.html`, with these answered for real:
+
+```
+GET  /api/profiles          one profile; the page uses this as a liveness probe
+GET  /api/state             tree, counts, coldStart, embedder, laptop: true
+GET  /api/agenda            dated notes
+GET  /api/notes             ?topic= &kind= &status=
+GET  /api/note              ?id=  (+ related, by similarity)
+GET  /api/inbox             unfiled + flagged
+GET  /api/suggest           ?id=  -> top 3 collections with similarities
+GET  /api/search            ?q=   substring + vector
+GET  /api/due               reminders that are due and have not fired
+POST /api/capture           the whole pipeline
+POST /api/chat              newline-delimited JSON: sources, token, done, error
+POST /api/note/ai           answer / add / replace
+POST /api/note/update       re-embeds, since the text changed
+POST /api/note/new
+POST /api/note/delete
+POST /api/note/discard      a blank note leaves no trace
+POST /api/note/schedule     sets due/remind and registers the notification
+POST /api/note/complete     cancels the reminder when done
+POST /api/move              clears the review flag: the user is correcting us
+POST /api/note/file         "file it for me"
+POST /api/reminded          fire-once keys, so nothing repeats
+```
+
+Still stubbed with the right empty shape: `/api/lists`, `/api/links`,
+`/api/garden`, `/api/graph`, `/api/personal`, `/api/undo`.
+
+### Known gaps
+
+- **Chat does not truly stream.** The events are collected and sent in one
+  response. `HTTPBodySequence` can stream, but threading async model tokens
+  through it is not something to write without a compiler to hand. The page
+  renders tokens as they arrive either way, so the answer appears at once
+  rather than word by word.
+- **Search is not Reciprocal Rank Fusion.** With no FTS5 there is no second
+  ranked list to fuse, so a literal match simply outranks a semantic one.
+- **No undo.** `/api/undo` returns null. The journal needs file homes of its
+  own, because it is not reconstructible from frontmatter the way notes and
+  collections are.
+- **No checklists, repeats or check-ins**, so `/api/list/*` is absent and
+  `/api/due` only ever returns `task` reminders — not the `item`, `checkin` or
+  `deadline` kinds `showAlert` can draw.

@@ -169,7 +169,8 @@ final class WebHost: ObservableObject {
                 capture: capture,
                 embedding: embedding,
                 chat: chat,
-                reminders: reminders
+                reminders: reminders,
+                intelligence: intelligence
             )
             await server.install(routes)
             await server.start()

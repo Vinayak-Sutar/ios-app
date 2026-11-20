@@ -22,6 +22,10 @@ final class RouteTable {
     private let embedding: EmbedderBox
     private let chat: Chat
     private let reminders: Reminders
+    /// Held rather than constructed per request: `Intelligence` is
+    /// main-actor-isolated, and the route closures are not, so building one
+    /// inside a closure is a call across the boundary.
+    private let intelligence: Intelligence
 
     init(
         diagnostics: Diagnostics,
@@ -29,7 +33,8 @@ final class RouteTable {
         capture: Capture,
         embedding: EmbedderBox,
         chat: Chat,
-        reminders: Reminders
+        reminders: Reminders,
+        intelligence: Intelligence
     ) {
         self.diagnostics = diagnostics
         self.vault = vault
@@ -37,6 +42,7 @@ final class RouteTable {
         self.embedding = embedding
         self.chat = chat
         self.reminders = reminders
+        self.intelligence = intelligence
     }
 
     func install(on server: HTTPServer) async {
@@ -108,7 +114,7 @@ final class RouteTable {
         }
 
         await server.appendRoute("GET /api/due") { [reminders] _ in
-            await Self.json(["reminders": reminders.dueNow(), "rolled": 0])
+            await Self.jsonObject(["reminders": reminders.dueNow(), "rolled": 0])
         }
 
         // The page posts back the keys it has just shown, so nothing fires
@@ -158,7 +164,7 @@ final class RouteTable {
             )
             // A finished note should not go on reminding.
             if done { await reminders.cancel(noteID: id) }
-            return Self.json(["ok": true, "next": NSNull()])
+            return Self.jsonObject(["ok": true, "next": NSNull()])
         }
     }
 
@@ -418,7 +424,7 @@ final class RouteTable {
             )
         }
 
-        await server.appendRoute("POST /api/note/ai") { [vault] request in
+        await server.appendRoute("POST /api/note/ai") { [vault, intelligence] request in
             let body = try await Self.body(request)
             let id = body["id"] as? String ?? ""
             let ask = (body["request"] as? String ?? "")
@@ -436,7 +442,7 @@ final class RouteTable {
                 )
             }
             do {
-                let edit = try await Intelligence().editNote(body: text, request: ask)
+                let edit = try await intelligence.editNote(body: text, request: ask)
                 return Self.json([
                     "action": edit.action.wire,
                     "reply": edit.reply,
@@ -518,7 +524,10 @@ final class RouteTable {
         )
     }
 
-    nonisolated static func json(_ value: [String: Any]) -> HTTPResponse {
+    /// Named separately from `json(_:status:)` rather than overloaded on it.
+    /// A dictionary of uniform value type satisfies both, and "it will
+    /// probably resolve" is not worth a round trip to a CI runner to find out.
+    nonisolated static func jsonObject(_ value: [String: Any]) -> HTTPResponse {
         let body = (try? JSONSerialization.data(withJSONObject: value))
             ?? Data("{\"error\":\"encoding failed\"}".utf8)
         return HTTPResponse(
