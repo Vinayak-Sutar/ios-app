@@ -20,12 +20,23 @@ final class RouteTable {
     private let vault: Vault
     private let capture: Capture
     private let embedding: EmbedderBox
+    private let chat: Chat
+    private let reminders: Reminders
 
-    init(diagnostics: Diagnostics, vault: Vault, capture: Capture, embedding: EmbedderBox) {
+    init(
+        diagnostics: Diagnostics,
+        vault: Vault,
+        capture: Capture,
+        embedding: EmbedderBox,
+        chat: Chat,
+        reminders: Reminders
+    ) {
         self.diagnostics = diagnostics
         self.vault = vault
         self.capture = capture
         self.embedding = embedding
+        self.chat = chat
+        self.reminders = reminders
     }
 
     func install(on server: HTTPServer) async {
@@ -33,6 +44,7 @@ final class RouteTable {
         await installState(on: server)
         await installNotes(on: server)
         await installCapture(on: server)
+        await installChat(on: server)
         await installStubs(on: server)
         await installDiagnostics(on: server)
 
@@ -95,10 +107,59 @@ final class RouteTable {
             ))
         }
 
-        await server.appendRoute("GET /api/due") { _ in
-            Self.json(API.Due(reminders: [], rolled: 0))
+        await server.appendRoute("GET /api/due") { [reminders] _ in
+            await Self.json(["reminders": reminders.dueNow(), "rolled": 0])
         }
-        await server.appendRoute("POST /api/reminded") { _ in Self.json(API.Ok()) }
+
+        // The page posts back the keys it has just shown, so nothing fires
+        // twice across a reload.
+        await server.appendRoute("POST /api/reminded") { [reminders] request in
+            let body = try await Self.body(request)
+            let keys = body["keys"] as? [String] ?? []
+            await reminders.markFired(keys)
+            return Self.json(API.Ok())
+        }
+
+        // Giving a note a time, from the note view or a snooze on an alert.
+        await server.appendRoute("POST /api/note/schedule") { [vault, reminders] request in
+            let body = try await Self.body(request)
+            let id = body["id"] as? String ?? ""
+            guard var entry = await vault.entry(id) else {
+                return Self.json(API.Failure(error: "not found"), status: .notFound)
+            }
+            let when = body["when"] as? String
+            let wantsReminder = body["remind"] as? Bool ?? true
+
+            entry.note.due = when
+            entry.note.remind = wantsReminder ? when : nil
+            entry.note.updated = Timestamp.utcNow()
+            _ = try? await vault.save(
+                entry.note, topic: entry.note.primaryTopic,
+                vector: entry.vector, needsReview: entry.needsReview
+            )
+
+            await reminders.cancel(noteID: id)
+            if entry.note.remind != nil { await reminders.schedule(entry.note) }
+            return Self.json(API.Ok())
+        }
+
+        await server.appendRoute("POST /api/note/complete") { [vault, reminders] request in
+            let body = try await Self.body(request)
+            let id = body["id"] as? String ?? ""
+            guard var entry = await vault.entry(id) else {
+                return Self.json(API.Failure(error: "not found"), status: .notFound)
+            }
+            let done = body["done"] as? Bool ?? true
+            entry.note.status = done ? "done" : "open"
+            entry.note.updated = Timestamp.utcNow()
+            _ = try? await vault.save(
+                entry.note, topic: entry.note.primaryTopic,
+                vector: entry.vector, needsReview: entry.needsReview
+            )
+            // A finished note should not go on reminding.
+            if done { await reminders.cancel(noteID: id) }
+            return Self.json(["ok": true, "next": NSNull()])
+        }
     }
 
     @MainActor
@@ -329,6 +390,69 @@ final class RouteTable {
         )
     }
 
+    // MARK: - Chat
+
+    private func installChat(on server: HTTPServer) async {
+        // Newline-delimited JSON, one event per line. The page reads it with a
+        // streaming reader, so the content type matters.
+        await server.appendRoute("POST /api/chat") { [chat] request in
+            let body = try await Self.body(request)
+            let message = (body["message"] as? String ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !message.isEmpty else {
+                return Self.ndjson([#"{"type":"error","message":"empty message"}"#])
+            }
+
+            var history: [(role: String, content: String)] = []
+            for turn in body["history"] as? [[String: Any]] ?? [] {
+                let role = turn["role"] as? String ?? "user"
+                let content = (turn["content"] as? String) ?? (turn["text"] as? String) ?? ""
+                if !content.isEmpty { history.append((role: role, content: content)) }
+            }
+
+            let data = await chat.respond(to: Chat.Request(message: message, history: history))
+            return HTTPResponse(
+                statusCode: .ok,
+                headers: [.contentType: "application/x-ndjson; charset=utf-8"],
+                body: data
+            )
+        }
+
+        await server.appendRoute("POST /api/note/ai") { [vault] request in
+            let body = try await Self.body(request)
+            let id = body["id"] as? String ?? ""
+            let ask = (body["request"] as? String ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let entry = await vault.entry(id)
+            let text = entry?.note.body ?? (body["body"] as? String ?? "")
+
+            guard !ask.isEmpty else {
+                return Self.json(API.Failure(error: "empty request"), status: .badRequest)
+            }
+            guard Intelligence.availability.isAvailable else {
+                return Self.json(
+                    API.Failure(error: "The on-device model isn't available yet."),
+                    status: .serviceUnavailable
+                )
+            }
+            do {
+                let edit = try await Intelligence().editNote(body: text, request: ask)
+                return Self.json([
+                    "action": edit.action.wire,
+                    "reply": edit.reply,
+                    "text": edit.text,
+                    "position": "end"
+                ])
+            } catch {
+                Log.model.error("note AI failed: \(error.localizedDescription, privacy: .public)")
+                return Self.json(
+                    API.Failure(error: "The model couldn't do that."),
+                    status: .serviceUnavailable
+                )
+            }
+        }
+    }
+
     // MARK: - Stubs
 
     /// Right shape, nothing in it. The page has designed empty states for all
@@ -401,6 +525,16 @@ final class RouteTable {
             statusCode: .ok,
             headers: [.contentType: "application/json; charset=utf-8"],
             body: body
+        )
+    }
+
+    nonisolated static func ndjson(_ lines: [String]) -> HTTPResponse {
+        HTTPResponse(
+            statusCode: .ok,
+            headers: [.contentType: "application/x-ndjson; charset=utf-8"],
+            body: Data((lines.joined(separator: "
+") + "
+").utf8)
         )
     }
 

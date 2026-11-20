@@ -117,6 +117,8 @@ final class WebHost: ObservableObject {
     private var embedding: EmbedderBox?
     private var capture: Capture?
     private var diagnostics: Diagnostics?
+    private var chat: Chat?
+    private var reminders: Reminders?
 
     func togglePage() {
         page = (page == .app) ? .diag : .app
@@ -151,14 +153,23 @@ final class WebHost: ObservableObject {
                 thresholds: Thresholds.appleGuess(embedderID: "pending")
             )
             let diagnostics = Diagnostics(embedding: embedding)
+            let chat = Chat(vault: vault, embedding: embedding, thresholds: { capture.thresholds })
+            let reminders = Reminders(vault: vault)
 
             self.vault = vault
             self.embedding = embedding
             self.capture = capture
             self.diagnostics = diagnostics
+            self.chat = chat
+            self.reminders = reminders
 
             let routes = RouteTable(
-                diagnostics: diagnostics, vault: vault, capture: capture, embedding: embedding
+                diagnostics: diagnostics,
+                vault: vault,
+                capture: capture,
+                embedding: embedding,
+                chat: chat,
+                reminders: reminders
             )
             await server.install(routes)
             await server.start()
@@ -177,6 +188,14 @@ final class WebHost: ObservableObject {
                     Log.vault.error("override ignored: \(note, privacy: .public)")
                 }
                 vault.reload(using: embedding.embedder)
+
+                // Ask only after the vault is loaded, so the prompt arrives
+                // when there is something to be reminded about rather than on
+                // a blank first launch.
+                await reminders.requestAuthorization()
+                // Pending notifications survive a relaunch but not a
+                // reinstall, and a 7-day sideload means reinstalling weekly.
+                await reminders.rescheduleAll()
             }
 
             let snapshot = await server.snapshot()

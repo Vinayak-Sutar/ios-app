@@ -173,6 +173,68 @@ final class Intelligence {
         return response.content
     }
 
+    /// The AI box inside a note: answer a question about it, add to it, or
+    /// rewrite it.
+    ///
+    /// The one unacceptable failure here is losing the user's writing, so a
+    /// rewrite that drops lines without being asked to remove anything is
+    /// rejected rather than applied. The Python app retries once in that case;
+    /// this refuses, which is the safe half of the same rule.
+    func editNote(body: String, request: String) async throws -> NoteEdit {
+        let session = LanguageModelSession(instructions: Self.noteInstructions)
+        let response = try await session.respond(
+            to: """
+                NOTE:
+                \(String(body.prefix(3000)))
+
+                REQUEST: \(request)
+                """,
+            generating: NoteEdit.self,
+            options: Self.deterministic
+        )
+        var edit = response.content
+
+        if edit.action == .replace {
+            let removalAsked = Self.looksLikeRemoval(request)
+            let dropped = Self.droppedLines(from: body, to: edit.text)
+            if !removalAsked && !dropped.isEmpty {
+                Log.model.error("rewrite dropped \(dropped.count, privacy: .public) lines; refused")
+                edit = NoteEdit(
+                    action: .answer,
+                    reply: "I'd have dropped \(dropped.count) line\(dropped.count == 1 ? "" : "s") "
+                        + "of your note doing that, so I've left it alone. Ask again more specifically?",
+                    text: ""
+                )
+            }
+        }
+        return edit
+    }
+
+    static let noteInstructions = """
+        You work on one note inside a private notes app. Choose exactly one \
+        action. Use answer to reply without changing the note, add to append \
+        new text, or replace to rewrite the whole note. When you replace, keep \
+        every line the user wrote unless they asked you to remove something.
+        """
+
+    /// Did the user actually ask for something to go?
+    static func looksLikeRemoval(_ request: String) -> Bool {
+        let lowered = request.lowercased()
+        return ["remove", "delete", "drop", "take out", "shorten", "trim", "condense", "summarise", "summarize"]
+            .contains { lowered.contains($0) }
+    }
+
+    /// Non-trivial lines present before and missing after.
+    static func droppedLines(from original: String, to rewritten: String) -> [String] {
+        let after = Set(
+            rewritten.components(separatedBy: "\n")
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+        )
+        return original.components(separatedBy: "\n")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { $0.count > 3 && !after.contains($0) }
+    }
+
     /// Role only, and short on purpose.
     ///
     /// The framework prepends instructions, so they cannot sit below the note.
@@ -217,4 +279,30 @@ final class Intelligence {
 struct ProbeAnswer {
     @Guide(description: "A single lowercase word.")
     var word: String
+}
+
+@Generable
+enum NoteAction {
+    case answer, add, replace
+
+    /// What `app.html` expects in the `action` field.
+    var wire: String {
+        switch self {
+        case .answer: return "answer"
+        case .add: return "add"
+        case .replace: return "replace"
+        }
+    }
+}
+
+@Generable
+struct NoteEdit {
+    @Guide(description: "answer to reply only, add to append text, replace to rewrite the note.")
+    var action: NoteAction
+
+    @Guide(description: "What to say to the user. One or two short sentences.")
+    var reply: String
+
+    @Guide(description: "The text to add or the full rewritten note. Empty when the action is answer.")
+    var text: String
 }
