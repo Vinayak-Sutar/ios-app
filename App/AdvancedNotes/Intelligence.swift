@@ -99,7 +99,11 @@ final class Intelligence {
     /// Why the model cannot be used, in Apple's own words. This enum is the
     /// only error message the framework ever gives, so it is surfaced verbatim
     /// rather than translated into something friendlier and less useful.
-    static var availability: Availability {
+    /// `nonisolated` because the route closures need it and they are not on
+    /// the main actor. A computed `static var` on a `@MainActor` type inherits
+    /// that isolation even when, as here, it reads no mutable state — it just
+    /// asks the framework a question.
+    nonisolated static var availability: Availability {
         switch SystemLanguageModel.default.availability {
         case .available:
             return .available
