@@ -112,9 +112,37 @@ So the iOS workflow greps its own build log on failure and re-emits each
 `error:` line as `::error::`, which turns it into an annotation. That is the
 channel compile errors come home through.
 
+## Measured on real hardware
+
+iPhone 17, iOS 26.6, from the app's own diagnostics on 2026-11-20 — not from
+documentation or a blog post:
+
+| | |
+|---|---|
+| `SystemLanguageModel.default.availability` | `available` |
+| `NLContextualEmbedding` dimension | **512** |
+| `modelIdentifier` | `5C45D94E-BAB4-4927-94B6-8B5745C46289` |
+| `revision` | 1 |
+| Assets | downloaded and loaded within a second of launch |
+
+So the secondhand "512 on iOS" figure is right. `maximumSequenceLength` is
+still unmeasured — it appears on the web diagnostics page, not the native
+panel.
+
+### Binding a local server: IPv4 vs IPv6
+
+FlyingFox's `.loopback(port:)` is declared on `sockaddr_in6`, so it binds `::1`
+only. A `WKWebView` pointed at `http://127.0.0.1` cannot reach it, and the
+failure is silent in the worst way: the bind succeeds, `waitUntilListening()`
+returns, the app reports itself healthy, and every connection is refused.
+
+Use `sockaddr_in.inet(ip4: "127.0.0.1", port:)`, which needs `import
+FlyingSocks` — FlyingFox imports it without re-exporting it. Do not fall back
+to `.inet(port:)`: that is `INADDR_ANY`, every interface, which would put the
+vault on the Wi-Fi.
+
 ## Still unverified
 
-- Whether `LanguageModelSession()` compiles with no arguments at all. Apple's
-  own example always passes `instructions:`.
+- `NLContextualEmbedding.maximumSequenceLength` on iOS.
 - Everything about how the model actually *behaves*, as opposed to what it
-  compiles into.
+  compiles into: filing quality, guardrail refusals, latency.
