@@ -1,3 +1,4 @@
+import NotesCore
 import SwiftUI
 import UIKit
 import WebKit

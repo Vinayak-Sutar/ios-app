@@ -61,7 +61,7 @@ public struct Decision: Sendable, Equatable {
     /// silently file the note anyway and quietly empty the triage queue -- a
     /// bug the Python code calls out by name, so it is enforced here instead of
     /// remembered.
-    static func inbox(reason: String, usedModel: Bool, confidence: Double = 0) -> Decision {
+    public static func inbox(reason: String, usedModel: Bool, confidence: Double = 0) -> Decision {
         Decision(
             topicPath: nil,
             outcome: .inbox,
@@ -206,7 +206,7 @@ public enum Router {
 }
 
 extension Decision {
-    func withReason(_ reason: String) -> Decision {
+    public func withReason(_ reason: String) -> Decision {
         var copy = self
         copy.reason = reason
         return copy

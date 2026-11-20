@@ -304,7 +304,7 @@ final class RouteTable {
         }
     }
 
-    private static func captureResult(_ outcome: Capture.Outcome) -> API.CaptureResult {
+    nonisolated private static func captureResult(_ outcome: Capture.Outcome) -> API.CaptureResult {
         API.CaptureResult(
             id: outcome.note.id,
             title: outcome.note.title,
