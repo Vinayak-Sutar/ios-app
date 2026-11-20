@@ -61,7 +61,7 @@ final class Chat {
             lines.append(text)
         }
 
-        let picked = retrieve(for: request.message)
+        let picked = await retrieve(for: request.message)
         emit([
             "type": "sources",
             "notes": picked.map { entry in
@@ -125,8 +125,8 @@ final class Chat {
     /// A note whose title is named in the question is always included, however
     /// it ranks — "what did I write in the trip note?" should not depend on
     /// cosine similarity finding it.
-    private func retrieve(for question: String) -> [Vault.Entry] {
-        let vector = embedding.embed(question)
+    private func retrieve(for question: String) async -> [Vault.Entry] {
+        let vector = await embedding.embed(question)
         var picked: [Vault.Entry] = []
         var seen = Set<String>()
 

@@ -62,7 +62,7 @@ final class Capture {
 
         // 2. Embed. Without a vector there is nothing to compare, so the note
         //    stays in Inbox — which is the honest answer, not a failure.
-        let vector = embedding.embed(note.embeddingText)
+        let vector = await embedding.embed(note.embeddingText)
         if vector.isEmpty {
             Log.model.notice("no vector; leaving in Inbox")
             let decision = Decision.inbox(reason: "the embedder is not ready yet", usedModel: false)
@@ -218,9 +218,18 @@ final class Capture {
 }
 
 /// Holds the embedder so callers do not each have to handle it being absent.
+///
+/// Stays on the main actor because that is where its callers are, but the
+/// embedder itself is an actor — so `prepare` and `embed` hop off to a
+/// background executor and the UI keeps running while a model loads.
+///
+/// `info` is cached at prepare time rather than read through on every access:
+/// a property read that costs an actor hop is a property read that gets called
+/// in a loop by accident.
 @MainActor
 final class EmbedderBox {
     private(set) var embedder: AppleEmbedder?
+    private(set) var info: AppleEmbedder.Info?
     private(set) var failure: String?
 
     func prepare() async {
@@ -228,25 +237,27 @@ final class EmbedderBox {
         do {
             let made = try AppleEmbedder()
             try await made.prepare()
+            info = await made.info()
             embedder = made
             failure = nil
+            Log.embed.notice("embedder ready: \(self.identifier, privacy: .public)")
         } catch {
             failure = "\(error)"
             Log.embed.error("embedder unavailable: \(self.failure ?? "", privacy: .public)")
         }
     }
 
-    func embed(_ text: String) -> [Float] {
+    func embed(_ text: String) async -> [Float] {
         guard let embedder else { return [] }
         do {
-            return try embedder.embed(text)
+            return try await embedder.embed(text)
         } catch {
             Log.embed.error("embed failed: \(error.localizedDescription, privacy: .public)")
             return []
         }
     }
 
-    var identifier: String { embedder?.embedderID ?? "unavailable" }
+    var identifier: String { info?.embedderID ?? "unavailable" }
 }
 
 extension NoteKind {

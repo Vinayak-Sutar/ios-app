@@ -59,7 +59,7 @@ final class Vault {
 
     /// Rescan the Markdown and rebuild the index, reusing any vector we already
     /// hold for an unchanged note so a reload does not re-embed the vault.
-    func reload(using embedder: AppleEmbedder?) {
+    func reload(using embedder: AppleEmbedder?) async {
         let cached = loadIndexFile()
         var next: [String: Entry] = [:]
 
@@ -71,7 +71,7 @@ final class Vault {
             var vector = cached[note.id]?.vector ?? []
             // Re-embed only when the note's meaning could have changed.
             if vector.isEmpty || cached[note.id]?.updated != note.updated {
-                vector = (try? embedder?.embed(note.embeddingText)) ?? []
+                vector = (try? await embedder?.embed(note.embeddingText)) ?? []
             }
             next[note.id] = Entry(
                 note: note,

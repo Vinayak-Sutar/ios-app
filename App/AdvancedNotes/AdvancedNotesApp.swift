@@ -188,7 +188,7 @@ final class WebHost: ObservableObject {
                 for note in rejected {
                     Log.vault.error("override ignored: \(note, privacy: .public)")
                 }
-                vault.reload(using: embedding.embedder)
+                await vault.reload(using: embedding.embedder)
 
                 // Ask only after the vault is loaded, so the prompt arrives
                 // when there is something to be reminded about rather than on
@@ -247,6 +247,7 @@ struct WebView: UIViewRepresentable {
         configuration.allowsInlineMediaPlayback = true
 
         let webView = WKWebView(frame: .zero, configuration: configuration)
+        webView.navigationDelegate = context.coordinator
         webView.allowsBackForwardNavigationGestures = true
         webView.scrollView.contentInsetAdjustmentBehavior = .never
         // The page draws its own background; a white flash between loads is
@@ -266,7 +267,39 @@ struct WebView: UIViewRepresentable {
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
-    final class Coordinator {
+    /// Reports what the web view actually did.
+    ///
+    /// Without this a failed load is completely silent: the view stays blank
+    /// and nothing anywhere says whether the request was refused, timed out or
+    /// succeeded and then rendered nothing. Those need different fixes, so the
+    /// log has to distinguish them.
+    final class Coordinator: NSObject, WKNavigationDelegate {
         var loadedToken = -1
+
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            Log.routes.notice("web view loaded \(webView.url?.absoluteString ?? "?", privacy: .public)")
+        }
+
+        func webView(
+            _ webView: WKWebView,
+            didFailProvisionalNavigation navigation: WKNavigation!,
+            withError error: Error
+        ) {
+            // "Provisional" means it never even started loading — a refused
+            // connection or a blocked request, not a page that failed later.
+            Log.routes.error("web view could not start loading: \(error.localizedDescription, privacy: .public)")
+        }
+
+        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+            Log.routes.error("web view failed mid-load: \(error.localizedDescription, privacy: .public)")
+        }
+
+        func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+            // The renderer was killed, usually for memory. A 1.5 MB page with
+            // embedded fonts is a plausible cause, and it looks like a blank
+            // screen from the outside.
+            Log.routes.error("web content process terminated; reloading")
+            webView.reload()
+        }
     }
 }

@@ -25,7 +25,6 @@ final class Diagnostics {
         self.embedding = embedding
     }
 
-    private var embedder: AppleEmbedder? { embedding.embedder }
 
     // MARK: - Report
 
@@ -128,7 +127,7 @@ final class Diagnostics {
             embedder: await embedderInfo(),
             sentenceEmbedding: Self.sentenceEmbeddingInfo(),
             storage: vault.info(),
-            thresholds: Thresholds.appleGuess(embedderID: embedder?.embedderID ?? "unknown"),
+            thresholds: Thresholds.appleGuess(embedderID: embedding.identifier),
             probes: lastProbes,
             bundle: Respond.bundleListing(),
             generatedAt: Timestamp.utcNow()
@@ -159,18 +158,18 @@ final class Diagnostics {
 
     private func embedderInfo() async -> EmbedderInfo {
         await embedding.prepare()
-        guard let embedder else {
+        guard let info = embedding.info else {
             return EmbedderInfo(ok: false, detail: embedding.failure ?? "not initialised")
         }
         return EmbedderInfo(
             ok: true,
             detail: nil,
-            embedderID: embedder.embedderID,
-            dimension: embedder.dimension,
-            maximumSequenceLength: embedder.maximumSequenceLength,
-            modelIdentifier: embedder.modelIdentifier,
-            revision: embedder.revision,
-            hasAvailableAssets: embedder.hasAvailableAssets
+            embedderID: info.embedderID,
+            dimension: info.dimension,
+            maximumSequenceLength: info.maximumSequenceLength,
+            modelIdentifier: info.modelIdentifier,
+            revision: info.revision,
+            hasAvailableAssets: info.hasAvailableAssets
         )
     }
 
@@ -178,7 +177,7 @@ final class Diagnostics {
     /// versus across topics tells us immediately whether these vectors can
     /// carry the filing decision.
     private func measureSeparation() async -> Separation? {
-        guard let embedder else { return nil }
+        guard embedding.info != nil else { return nil }
 
         let gaming = [
             "Malenia waterfowl dance timing is brutal, bloodhound step on the second swing",
@@ -194,13 +193,8 @@ final class Diagnostics {
         let start = Date()
         var gamingVectors: [[Float]] = []
         var cookingVectors: [[Float]] = []
-        do {
-            gamingVectors = try gaming.map { try embedder.embed($0) }
-            cookingVectors = try cooking.map { try embedder.embed($0) }
-        } catch {
-            Log.embed.error("separation probe failed: \(error.localizedDescription, privacy: .public)")
-            return nil
-        }
+        for text in gaming { gamingVectors.append(await embedding.embed(text)) }
+        for text in cooking { cookingVectors.append(await embedding.embed(text)) }
         guard gamingVectors.allSatisfy({ !$0.isEmpty }), cookingVectors.allSatisfy({ !$0.isEmpty }) else {
             return nil
         }

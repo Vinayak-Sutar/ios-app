@@ -4,6 +4,14 @@ import NotesCore
 
 /// Turns a note into one vector using Apple's on-device contextual embedder.
 ///
+/// **An actor, deliberately.** `requestAssets()` can download a model over the
+/// network and `load()` pulls it into memory; on a fresh install that is
+/// seconds at best. Running either on the main actor freezes the UI *and*
+/// stalls every route that needs main-actor state — which on the first real
+/// device launch presented as a blank page with an unresponsive button, since
+/// `/api/state` could not be served while the model loaded. Isolating this
+/// type moves that work to a background executor.
+///
 /// `NLContextualEmbedding` returns vectors at the *subword* level — Apple's own
 /// docs say to "pool or combine subword vectors" for a whole-text
 /// representation — so a note vector is the mean of its token vectors,
@@ -21,7 +29,7 @@ import NotesCore
 ///    read at runtime. Secondhand sources say 512 and ~256 on iOS, but Apple
 ///    documents the properties without publishing values and they differ on
 ///    macOS. The diagnostics page prints whatever the device actually says.
-final class AppleEmbedder {
+actor AppleEmbedder {
 
     enum Failure: Error, CustomStringConvertible {
         case unsupportedScript
@@ -49,11 +57,27 @@ final class AppleEmbedder {
     /// revision change is detectable rather than silently reinterpreted.
     let embedderID: String
 
-    var dimension: Int { embedding.dimension }
-    var maximumSequenceLength: Int { embedding.maximumSequenceLength }
-    var hasAvailableAssets: Bool { embedding.hasAvailableAssets }
-    var modelIdentifier: String { embedding.modelIdentifier }
-    var revision: Int { embedding.revision }
+    /// A snapshot of what the model reports, so callers can read it without
+    /// hopping onto this actor for every field.
+    struct Info: Sendable {
+        var embedderID: String
+        var dimension: Int
+        var maximumSequenceLength: Int
+        var modelIdentifier: String
+        var revision: Int
+        var hasAvailableAssets: Bool
+    }
+
+    func info() -> Info {
+        Info(
+            embedderID: embedderID,
+            dimension: embedding.dimension,
+            maximumSequenceLength: embedding.maximumSequenceLength,
+            modelIdentifier: embedding.modelIdentifier,
+            revision: embedding.revision,
+            hasAvailableAssets: embedding.hasAvailableAssets
+        )
+    }
 
     init(script: NLScript = .latin, language: NLLanguage = .english) throws {
         guard let embedding = NLContextualEmbedding(script: script) else {
