@@ -73,21 +73,62 @@ final class WebHost: ObservableObject {
     @Published private(set) var reloadToken = 0
 
     private let server = LocalServer()
-    private var diagnostics: Diagnostics?
     private var started = false
     private var foregroundObserver: NSObjectProtocol?
+
+    // Kept alive for the app's lifetime: the vault holds the in-memory index
+    // and the embedder holds loaded model assets, so neither should be rebuilt
+    // per request.
+    private var vault: Vault?
+    private var embedding: EmbedderBox?
+    private var capture: Capture?
+    private var diagnostics: Diagnostics?
 
     func start() {
         guard !started else { return }
         started = true
 
         Task {
-            let diagnostics = Diagnostics()
-            self.diagnostics = diagnostics
-            let routes = RouteTable(diagnostics: diagnostics)
+            let vault = Vault()
+            let embedding = EmbedderBox()
+            let intelligence = Intelligence()
 
+            do {
+                try vault.prepare()
+            } catch {
+                phase = .failed("could not create the vault: \(error.localizedDescription)")
+                started = false
+                return
+            }
+
+            // Serve the page as soon as the port is up. Loading the embedder's
+            // assets can take a while on a fresh install, and the vault scan
+            // grows with the note count — neither should hold the UI back,
+            // because an unembedded note still saves, it just lands in Inbox.
+            let capture = Capture(
+                vault: vault,
+                intelligence: intelligence,
+                embedding: embedding,
+                thresholds: Thresholds.appleGuess(embedderID: "pending")
+            )
+            let diagnostics = Diagnostics(embedding: embedding)
+
+            self.vault = vault
+            self.embedding = embedding
+            self.capture = capture
+            self.diagnostics = diagnostics
+
+            let routes = RouteTable(
+                diagnostics: diagnostics, vault: vault, capture: capture, embedding: embedding
+            )
             await server.install(routes)
             await server.start()
+
+            Task {
+                await embedding.prepare()
+                capture.thresholds = Thresholds.appleGuess(embedderID: embedding.identifier)
+                vault.reload(using: embedding.embedder)
+            }
 
             let snapshot = await server.snapshot()
             if snapshot.state == .listening {

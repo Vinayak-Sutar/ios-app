@@ -161,6 +161,56 @@ final class Intelligence {
             }
         }
     }
+
+    /// The capture call: one round trip that reads the note and picks a slot.
+    func read(text: String, candidates: [Candidate]) async throws -> CaptureReading {
+        let session = LanguageModelSession(instructions: Self.instructions)
+        let response = try await session.respond(
+            to: Self.prompt(text: text, candidates: candidates),
+            generating: CaptureReading.self,
+            options: Self.deterministic
+        )
+        return response.content
+    }
+
+    /// Role only, and short on purpose.
+    ///
+    /// The framework prepends instructions, so they cannot sit below the note.
+    /// Keeping them to two sentences is the next best thing: a long preamble
+    /// competes with the note for the model's attention, and the Python
+    /// measurements found a small model will answer about whatever it read
+    /// last.
+    static let instructions = """
+        You file a note into one of the user's collections. \
+        Answer only about the NOTE, never about the list of collections.
+        """
+
+    /// Note text first, then the numbered slate, then the question.
+    ///
+    /// The ordering is measured, not stylistic: with the instructions and the
+    /// collection list ahead of it, a small model tends to answer about the
+    /// list rather than about the note.
+    static func prompt(text: String, candidates: [Candidate]) -> String {
+        var out = "NOTE:\n" + String(text.prefix(3000)) + "\n\n"
+
+        if candidates.isEmpty {
+            out += "COLLECTIONS:\n  (none yet)\n\n"
+        } else {
+            out += "COLLECTIONS:\n"
+            for (index, candidate) in candidates.enumerated() {
+                out += "  \(index + 1). \(candidate.path) (\(candidate.noteCount) notes)\n"
+            }
+            out += "\n"
+        }
+
+        out += """
+            Which numbered collection does the NOTE belong in? \
+            Answer collection1 through collection\(max(1, candidates.count)) for one of the \
+            listed collections, newCollection if the note is about a subject none \
+            of them cover, or noneFit if it is too vague to be about anything.
+            """
+        return out
+    }
 }
 
 @Generable

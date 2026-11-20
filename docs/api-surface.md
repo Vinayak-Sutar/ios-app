@@ -58,7 +58,7 @@ states and nothing errors.
 GET  /api/links        -> {links: []}
 GET  /api/personal     -> an empty overview
 GET  /api/garden       -> {proposals: []}
-GET  /api/graph        -> {nodes: [], edges: []}
+GET  /api/graph        -> {links: [], nodes: []}
 GET  /api/lists        -> {lists: []}
 GET  /api/ai           -> enough for Settings to render; AI settings are
                           Ollama-specific on the Windows side and mean

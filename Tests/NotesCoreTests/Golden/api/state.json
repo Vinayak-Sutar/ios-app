@@ -1,10 +1,10 @@
 {
-  "coldStart": 20,
-  "embedder": "ollama:nomic-embed-text",
+  "coldStart": 0,
+  "embedder": "hashing-512d-3.4g",
   "embedderChanged": null,
-  "inbox": 0,
+  "inbox": 7,
   "laptop": true,
-  "notes": 0,
+  "notes": 16,
   "paths": {
     "host": "http://127.0.0.1:11434",
     "models": "D:\\temp\\mnemo\\vendor\\models",
@@ -13,10 +13,53 @@
     "vault": "C:\\Users\\VINAYAK\\AppData\\Local\\Temp\\claude\\11e8d088bd9070fc\\d53e0b24-9d84-4af7-8be2-d71d35c8f450\\scratchpad\\golden-vault",
     "vendor": "D:\\temp\\mnemo\\vendor"
   },
-  "profile": "ollama-nomic",
+  "profile": "offline-hashing",
   "review": 0,
-  "router": "ollama:gemma4:e4b",
-  "topics": 0,
-  "tree": [],
+  "router": "offline",
+  "topics": 4,
+  "tree": [
+    {
+      "children": [],
+      "count": 1,
+      "id": "01M7VBQ2TMTGKY7JAGGEDP6YYW",
+      "name": "cooking",
+      "own": 1,
+      "path": "cooking",
+      "state": "active",
+      "views": {}
+    },
+    {
+      "children": [],
+      "count": 2,
+      "id": "01M7VBQ2TV3T40F42KNR0B6PRA",
+      "name": "gaming",
+      "own": 2,
+      "path": "gaming",
+      "state": "active",
+      "views": {}
+    },
+    {
+      "children": [],
+      "count": 2,
+      "id": "01M7VBQ2WNGSH7RTZR24JSR203",
+      "name": "music",
+      "own": 2,
+      "path": "music",
+      "state": "active",
+      "views": {}
+    },
+    {
+      "children": [],
+      "count": 4,
+      "id": "01M7VBQ2X3WEW2HPAB1BM9JXX9",
+      "name": "technology",
+      "own": 4,
+      "path": "technology",
+      "state": "active",
+      "views": {
+        "image": 1
+      }
+    }
+  ],
   "vault": "C:\\Users\\VINAYAK\\AppData\\Local\\Temp\\claude\\11e8d088bd9070fc\\d53e0b24-9d84-4af7-8be2-d71d35c8f450\\scratchpad\\golden-vault"
 }

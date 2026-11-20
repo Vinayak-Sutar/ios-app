@@ -14,16 +14,18 @@ final class Diagnostics {
 
     private let intelligence: Intelligence
     private let vault: VaultProbe
-    private var embedder: AppleEmbedder?
+    /// Shared with the capture pipeline. Two `AppleEmbedder`s would mean
+    /// loading the model assets twice for no reason.
+    private let embedding: EmbedderBox
     private var lastProbes: Probes?
 
-    // Built in the body rather than as default arguments: a default argument
-    // expression is evaluated in a nonisolated context, so `Intelligence()`
-    // there is a call to a main-actor initializer from off the main actor.
-    init() {
+    init(embedding: EmbedderBox) {
         self.intelligence = Intelligence()
         self.vault = VaultProbe()
+        self.embedding = embedding
     }
+
+    private var embedder: AppleEmbedder? { embedding.embedder }
 
     // MARK: - Report
 
@@ -152,16 +154,10 @@ final class Diagnostics {
     }
 
     private func embedderInfo() async -> EmbedderInfo {
-        if embedder == nil {
-            do {
-                let made = try AppleEmbedder()
-                try await made.prepare()
-                embedder = made
-            } catch {
-                return EmbedderInfo(ok: false, detail: "\(error)")
-            }
+        await embedding.prepare()
+        guard let embedder else {
+            return EmbedderInfo(ok: false, detail: embedding.failure ?? "not initialised")
         }
-        guard let embedder else { return EmbedderInfo(ok: false, detail: "not initialised") }
         return EmbedderInfo(
             ok: true,
             detail: nil,

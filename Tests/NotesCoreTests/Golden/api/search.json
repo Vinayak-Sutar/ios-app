@@ -1,0 +1,148 @@
+{
+  "hits": [
+    {
+      "id": "01M1M1302B6TXC84AMG9DETTN7",
+      "kind": "note",
+      "score": 0.03279,
+      "snippet": "rag chunking with 200 token overlap beats 50 by a wide margin",
+      "title": "rag chunking with 200 token overlap beats 50 by a wide margin",
+      "topic": "technology",
+      "via": "both"
+    },
+    {
+      "id": "01M1M1R62TYF9PKCC4GAGQVQ4T",
+      "kind": "image",
+      "score": 0.03226,
+      "snippet": "Text excerpt: Chunk overlap, cross-encoder reranking, retrieval budget review meeting with Priya on . Text in image The chunk overlap of 200 tokens outperfo",
+      "title": "Text excerpt: Chunk overlap, cross-encoder reranking, retrieval budget",
+      "topic": "technology",
+      "via": "both"
+    },
+    {
+      "id": "01M1M1304BQ0RXZAS21V2M5S00",
+      "kind": "note",
+      "score": 0.01587,
+      "snippet": "cross encoder reranking improves precision but costs latency",
+      "title": "cross encoder reranking improves precision but costs latency",
+      "topic": "technology",
+      "via": "vector"
+    },
+    {
+      "id": "01M1M1308XTAHHK4HZY74AQQJZ",
+      "kind": "task",
+      "score": 0.01562,
+      "snippet": "call the bank about the mortgage",
+      "title": "call the bank about the mortgage",
+      "topic": null,
+      "via": "vector"
+    },
+    {
+      "id": "01M1M12Y9TQCFM8EAR3RSAHGDB",
+      "kind": "note",
+      "score": 0.01538,
+      "snippet": "malenia waterfowl dance timing is brutal, bloodhound step on the second flurry works mimic tear makes the fight much easier",
+      "title": "malenia waterfowl dance timing is brutal, bloodhound step on the...",
+      "topic": "gaming",
+      "via": "vector"
+    },
+    {
+      "id": "01M1M1304Y885KM2FKWJ4MTYQ7",
+      "kind": "note",
+      "score": 0.01515,
+      "snippet": "css grid template areas are clearer than nested flexbox",
+      "title": "css grid template areas are clearer than nested flexbox",
+      "topic": "technology",
+      "via": "vector"
+    },
+    {
+      "id": "01M1M13075SZH263Z2QMCPXJ1Y",
+      "kind": "note",
+      "score": 0.01493,
+      "snippet": "barre chords need wrist angle not grip strength",
+      "title": "barre chords need wrist angle not grip strength",
+      "topic": "music",
+      "via": "vector"
+    },
+    {
+      "id": "01M1M13066MKWTMW2XY562D4HK",
+      "kind": "note",
+      "score": 0.01471,
+      "snippet": "pentatonic scale shapes across the fretboard finally clicked",
+      "title": "pentatonic scale shapes across the fretboard finally clicked",
+      "topic": "music",
+      "via": "vector"
+    },
+    {
+      "id": "01M1M13A1PQNMSB2Q1R546W0AY",
+      "kind": "task",
+      "score": 0.01449,
+      "snippet": "renew the domain before it lapses",
+      "title": "renew the domain before it lapses",
+      "topic": null,
+      "via": "vector"
+    },
+    {
+      "id": "01M1M1308CW96KN3JMYNYNP0RB",
+      "kind": "note",
+      "score": 0.01429,
+      "snippet": "sourdough levain at 100 percent hydration doubles in about 5 hours",
+      "title": "sourdough levain at 100 percent hydration doubles in about 5 hours",
+      "topic": "cooking",
+      "via": "vector"
+    },
+    {
+      "id": "01M1M2AF0TZ64ZTM21N2YXGWW6",
+      "kind": "image",
+      "score": 0.01408,
+      "snippet": "the deploy that broke last night Deployment Failure Notification - PostgreSQL, Production Server, \"10.0.4.17\" Software: psycopg2, PostgreSQL Environment: Pro",
+      "title": "the deploy that broke last night",
+      "topic": null,
+      "via": "vector"
+    },
+    {
+      "id": "01M1M13DBEZ21K9FWR20GVWG6S",
+      "kind": "task",
+      "score": 0.01389,
+      "snippet": "buy milk and coffee",
+      "title": "buy milk and coffee",
+      "topic": null,
+      "via": "vector"
+    },
+    {
+      "id": "01M1M13EYA82WEG4K06PQ13GD8",
+      "kind": "task",
+      "score": 0.0137,
+      "snippet": "check the deploy logs",
+      "title": "check the deploy logs",
+      "topic": null,
+      "via": "vector"
+    },
+    {
+      "id": "01M1M1423W76KDGZR89KPAKJ9R",
+      "kind": "note",
+      "score": 0.01351,
+      "snippet": "some drifting thought that belongs nowhere in particular zzz qqq",
+      "title": "some drifting thought that belongs nowhere in particular zzz qqq",
+      "topic": null,
+      "via": "vector"
+    },
+    {
+      "id": "01M4KBE9BVM28GJM5QD3ARC37N",
+      "kind": "note",
+      "score": 0.01333,
+      "snippet": "",
+      "title": "Untitled",
+      "topic": null,
+      "via": "vector"
+    },
+    {
+      "id": "01M1M12ZYQH03DRESKW1PSFQ69",
+      "kind": "note",
+      "score": 0.01316,
+      "snippet": "the rtx 4070 undervolt saves about 30 watts with no framerate loss okay nice.",
+      "title": "the rtx 4070 undervolt saves about 30 watts with no framerate loss",
+      "topic": "gaming",
+      "via": "vector"
+    }
+  ]
+}

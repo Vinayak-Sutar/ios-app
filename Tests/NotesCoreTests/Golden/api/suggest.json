@@ -1,0 +1,19 @@
+{
+  "suggestions": [
+    {
+      "count": 2,
+      "path": "gaming",
+      "similarity": 0.119
+    },
+    {
+      "count": 2,
+      "path": "music",
+      "similarity": 0.053
+    },
+    {
+      "count": 1,
+      "path": "cooking",
+      "similarity": 0.034
+    }
+  ]
+}

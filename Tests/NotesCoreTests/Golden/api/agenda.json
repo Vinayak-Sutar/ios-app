@@ -1,5 +1,102 @@
 {
-  "anytime": [],
+  "anytime": [
+    {
+      "created": "2026-09-03T16:19:47Z",
+      "done": false,
+      "due": null,
+      "id": "01M1M13EYA82WEG4K06PQ13GD8",
+      "kind": "task",
+      "lines": [
+        {
+          "t": "text",
+          "text": "check the deploy logs"
+        }
+      ],
+      "media": null,
+      "path": "Inbox/check-the-deploy-logs.md",
+      "progress": null,
+      "remind": false,
+      "review": false,
+      "snippet": "check the deploy logs",
+      "source": null,
+      "status": "open",
+      "title": "check the deploy logs",
+      "topic": null,
+      "updated": "2026-09-03T16:19:47Z"
+    },
+    {
+      "created": "2026-09-03T16:19:46Z",
+      "done": false,
+      "due": null,
+      "id": "01M1M13DBEZ21K9FWR20GVWG6S",
+      "kind": "task",
+      "lines": [
+        {
+          "t": "text",
+          "text": "buy milk and coffee"
+        }
+      ],
+      "media": null,
+      "path": "Inbox/buy-milk-and-coffee.md",
+      "progress": null,
+      "remind": false,
+      "review": false,
+      "snippet": "buy milk and coffee",
+      "source": null,
+      "status": "open",
+      "title": "buy milk and coffee",
+      "topic": null,
+      "updated": "2026-09-03T16:19:46Z"
+    },
+    {
+      "created": "2026-09-03T16:19:42Z",
+      "done": false,
+      "due": null,
+      "id": "01M1M13A1PQNMSB2Q1R546W0AY",
+      "kind": "task",
+      "lines": [
+        {
+          "t": "text",
+          "text": "renew the domain before it lapses"
+        }
+      ],
+      "media": null,
+      "path": "Inbox/renew-the-domain-before-it-lapses.md",
+      "progress": null,
+      "remind": false,
+      "review": false,
+      "snippet": "renew the domain before it lapses",
+      "source": null,
+      "status": "open",
+      "title": "renew the domain before it lapses",
+      "topic": null,
+      "updated": "2026-09-03T16:19:42Z"
+    },
+    {
+      "created": "2026-09-03T16:19:32Z",
+      "done": false,
+      "due": null,
+      "id": "01M1M1308XTAHHK4HZY74AQQJZ",
+      "kind": "task",
+      "lines": [
+        {
+          "t": "text",
+          "text": "call the bank about the mortgage"
+        }
+      ],
+      "media": null,
+      "path": "Inbox/call-the-bank-about-the-mortgage.md",
+      "progress": null,
+      "remind": false,
+      "review": false,
+      "snippet": "call the bank about the mortgage",
+      "source": null,
+      "status": "open",
+      "title": "call the bank about the mortgage",
+      "topic": null,
+      "updated": "2026-09-03T16:19:32Z"
+    }
+  ],
   "items": [],
   "lists": [],
   "notes": []

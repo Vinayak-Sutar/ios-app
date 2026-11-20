@@ -1,4 +1,195 @@
 {
-  "links": [],
-  "nodes": []
+  "links": [
+    {
+      "source": "01M7VBQ2X3WEW2HPAB1BM9JXX9",
+      "target": "01M1M1R62TYF9PKCC4GAGQVQ4T",
+      "type": "about"
+    },
+    {
+      "source": "01M7VBQ2TMTGKY7JAGGEDP6YYW",
+      "target": "01M1M1308CW96KN3JMYNYNP0RB",
+      "type": "about"
+    },
+    {
+      "source": "01M7VBQ2TV3T40F42KNR0B6PRA",
+      "target": "01M1M12ZYQH03DRESKW1PSFQ69",
+      "type": "about"
+    },
+    {
+      "source": "01M7VBQ2WNGSH7RTZR24JSR203",
+      "target": "01M1M13075SZH263Z2QMCPXJ1Y",
+      "type": "about"
+    },
+    {
+      "source": "01M7VBQ2WNGSH7RTZR24JSR203",
+      "target": "01M1M13066MKWTMW2XY562D4HK",
+      "type": "about"
+    },
+    {
+      "source": "01M7VBQ2X3WEW2HPAB1BM9JXX9",
+      "target": "01M1M1304BQ0RXZAS21V2M5S00",
+      "type": "about"
+    },
+    {
+      "source": "01M7VBQ2X3WEW2HPAB1BM9JXX9",
+      "target": "01M1M1304Y885KM2FKWJ4MTYQ7",
+      "type": "about"
+    },
+    {
+      "source": "01M7VBQ2X3WEW2HPAB1BM9JXX9",
+      "target": "01M1M1302B6TXC84AMG9DETTN7",
+      "type": "about"
+    },
+    {
+      "source": "01M7VBQ2TV3T40F42KNR0B6PRA",
+      "target": "01M1M12Y9TQCFM8EAR3RSAHGDB",
+      "type": "about"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "01M7VBQ2TMTGKY7JAGGEDP6YYW",
+      "label": "cooking",
+      "path": "cooking",
+      "size": 1,
+      "state": "active",
+      "type": "topic"
+    },
+    {
+      "id": "01M7VBQ2TV3T40F42KNR0B6PRA",
+      "label": "gaming",
+      "path": "gaming",
+      "size": 2,
+      "state": "active",
+      "type": "topic"
+    },
+    {
+      "id": "01M7VBQ2WNGSH7RTZR24JSR203",
+      "label": "music",
+      "path": "music",
+      "size": 2,
+      "state": "active",
+      "type": "topic"
+    },
+    {
+      "id": "01M7VBQ2X3WEW2HPAB1BM9JXX9",
+      "label": "technology",
+      "path": "technology",
+      "size": 4,
+      "state": "active",
+      "type": "topic"
+    },
+    {
+      "id": "01M4KBE9BVM28GJM5QD3ARC37N",
+      "label": "Untitled",
+      "size": 1,
+      "topic": null,
+      "type": "note"
+    },
+    {
+      "id": "01M1M2AF0TZ64ZTM21N2YXGWW6",
+      "label": "the deploy that broke last night",
+      "size": 1,
+      "topic": null,
+      "type": "note"
+    },
+    {
+      "id": "01M1M1R62TYF9PKCC4GAGQVQ4T",
+      "label": "Text excerpt: Chunk overlap, cross-encoder reranking, retrieval budget",
+      "size": 1,
+      "topic": "technology",
+      "type": "note"
+    },
+    {
+      "id": "01M1M1423W76KDGZR89KPAKJ9R",
+      "label": "some drifting thought that belongs nowhere in particular zzz qqq",
+      "size": 1,
+      "topic": null,
+      "type": "note"
+    },
+    {
+      "id": "01M1M13EYA82WEG4K06PQ13GD8",
+      "label": "check the deploy logs",
+      "size": 1,
+      "topic": null,
+      "type": "note"
+    },
+    {
+      "id": "01M1M13DBEZ21K9FWR20GVWG6S",
+      "label": "buy milk and coffee",
+      "size": 1,
+      "topic": null,
+      "type": "note"
+    },
+    {
+      "id": "01M1M13A1PQNMSB2Q1R546W0AY",
+      "label": "renew the domain before it lapses",
+      "size": 1,
+      "topic": null,
+      "type": "note"
+    },
+    {
+      "id": "01M1M1308CW96KN3JMYNYNP0RB",
+      "label": "sourdough levain at 100 percent hydration doubles in about 5 hours",
+      "size": 1,
+      "topic": "cooking",
+      "type": "note"
+    },
+    {
+      "id": "01M1M12ZYQH03DRESKW1PSFQ69",
+      "label": "the rtx 4070 undervolt saves about 30 watts with no framerate loss",
+      "size": 1,
+      "topic": "gaming",
+      "type": "note"
+    },
+    {
+      "id": "01M1M1308XTAHHK4HZY74AQQJZ",
+      "label": "call the bank about the mortgage",
+      "size": 1,
+      "topic": null,
+      "type": "note"
+    },
+    {
+      "id": "01M1M13075SZH263Z2QMCPXJ1Y",
+      "label": "barre chords need wrist angle not grip strength",
+      "size": 1,
+      "topic": "music",
+      "type": "note"
+    },
+    {
+      "id": "01M1M13066MKWTMW2XY562D4HK",
+      "label": "pentatonic scale shapes across the fretboard finally clicked",
+      "size": 1,
+      "topic": "music",
+      "type": "note"
+    },
+    {
+      "id": "01M1M1304BQ0RXZAS21V2M5S00",
+      "label": "cross encoder reranking improves precision but costs latency",
+      "size": 1,
+      "topic": "technology",
+      "type": "note"
+    },
+    {
+      "id": "01M1M1304Y885KM2FKWJ4MTYQ7",
+      "label": "css grid template areas are clearer than nested flexbox",
+      "size": 1,
+      "topic": "technology",
+      "type": "note"
+    },
+    {
+      "id": "01M1M1302B6TXC84AMG9DETTN7",
+      "label": "rag chunking with 200 token overlap beats 50 by a wide margin",
+      "size": 1,
+      "topic": "technology",
+      "type": "note"
+    },
+    {
+      "id": "01M1M12Y9TQCFM8EAR3RSAHGDB",
+      "label": "malenia waterfowl dance timing is brutal, bloodhound step on the...",
+      "size": 1,
+      "topic": "gaming",
+      "type": "note"
+    }
+  ]
 }
