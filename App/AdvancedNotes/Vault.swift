@@ -28,6 +28,9 @@ final class Vault {
     private let indexURL: URL
 
     private(set) var entries: [String: Entry] = [:]
+    /// Every change that can be taken back. In memory only: undo is for the
+    /// action you just regretted, not for history.
+    var journal = Journal()
     /// Collection path -> running centroid and member count.
     private(set) var centroids: [String: (vector: [Float], count: Int)] = [:]
 
@@ -207,8 +210,33 @@ final class Vault {
     /// disk before anything that can fail is allowed to run, so filing is the
     /// only thing a failure can cost.
     @discardableResult
-    func save(_ note: Note, topic: String?, vector: [Float], needsReview: Bool) throws -> String {
+    func save(
+        _ note: Note,
+        topic: String?,
+        vector: [Float],
+        needsReview: Bool,
+        recordUndo: Bool = false
+    ) throws -> String {
         let target = url(for: note, topic: topic)
+
+        if recordUndo {
+            if let existing = entries[note.id] {
+                // Record what it was, before it stops being that.
+                if existing.note.primaryTopic != topic {
+                    journal.record(
+                        .moved(id: note.id, from: existing.note.primaryTopic, to: topic),
+                        at: Timestamp.utcNow()
+                    )
+                } else if existing.note.body != note.body || existing.note.title != note.title {
+                    journal.record(
+                        .edited(id: note.id, title: existing.note.title, body: existing.note.body),
+                        at: Timestamp.utcNow()
+                    )
+                }
+            } else {
+                journal.record(.created(id: note.id), at: Timestamp.utcNow())
+            }
+        }
 
         // Moving collections leaves the old file behind otherwise.
         if let existing = entries[note.id], existing.path != target.relative {
@@ -227,12 +255,30 @@ final class Vault {
         return target.relative
     }
 
-    func delete(_ id: String) throws {
+    func delete(_ id: String, recordUndo: Bool = true) throws {
         guard let entry = entries[id] else { return }
+        if recordUndo {
+            // Capture the file before removing it: afterwards there is nothing
+            // left to reconstruct it from.
+            let markdown = FrontmatterCodec.render(entry.note)
+            journal.record(
+                .deleted(id: id, markdown: markdown, path: entry.path),
+                at: Timestamp.utcNow()
+            )
+        } else {
+            journal.forget(noteID: id)
+        }
         try? FileManager.default.removeItem(at: root.appendingPathComponent(entry.path))
         entries.removeValue(forKey: id)
         rebuildCentroids()
         saveIndexFile()
+    }
+
+    /// Remember a checklist body before it is ticked, so the tick can be
+    /// taken back without re-embedding: ticking does not change what a note
+    /// is about.
+    func recordTick(id: String, previousBody: String) {
+        journal.record(.ticked(id: id, body: previousBody), at: Timestamp.utcNow())
     }
 
     func setReviewed(_ id: String) {

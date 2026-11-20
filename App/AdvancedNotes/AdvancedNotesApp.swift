@@ -109,6 +109,9 @@ private struct CapsuleChip: ViewModifier {
 struct NativePanel: View {
     @ObservedObject var host: WebHost
     @State private var lines: [String] = []
+    @State private var running = false
+    @State private var testSummary: String?
+    @State private var testResults: [SelfTest.Check] = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -129,6 +132,33 @@ struct NativePanel: View {
                     field("Model", Intelligence.availability.describe)
                     field("Embedder", host.embedderSummary)
 
+                    if let testSummary {
+                        Text("Self-test").font(.subheadline.weight(.semibold)).padding(.top, 6)
+                        Text(testSummary)
+                            .font(.callout.weight(.semibold))
+                            .foregroundStyle(testSummary.contains("FAILED") ? Color.red : Color.green)
+                        ForEach(Array(testResults.enumerated()), id: \.offset) { _, check in
+                            HStack(alignment: .top, spacing: 8) {
+                                Text(check.status == "pass" ? "ok" : (check.status == "skip" ? "--" : "FAIL"))
+                                    .font(.system(size: 11, design: .monospaced))
+                                    .foregroundStyle(
+                                        check.status == "fail" ? Color.red
+                                            : (check.status == "skip" ? Color.secondary : Color.green)
+                                    )
+                                    .frame(width: 34, alignment: .leading)
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(check.name).font(.caption)
+                                    if !check.detail.isEmpty {
+                                        Text(check.detail)
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                            .textSelection(.enabled)
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     Text("Log").font(.subheadline.weight(.semibold)).padding(.top, 6)
                     Text(lines.isEmpty ? "(empty)" : lines.joined(separator: "\n"))
                         .font(.system(size: 11, design: .monospaced))
@@ -140,14 +170,35 @@ struct NativePanel: View {
 
             Divider()
             HStack {
-                Button("Refresh") { lines = Log.recentEntries(limit: 120) }
+                // Runs natively, so it still works when the web view does
+                // not — which is exactly when you most want to know what is
+                // broken.
+                Button(running ? "Running…" : "Run tests") { runTests() }
+                    .disabled(running)
                 Spacer()
+                Button("Refresh") { lines = Log.recentEntries(limit: 120) }
                 Button("Reload page") { host.reload() }
             }
             .padding()
         }
         .background(Color(UIColor.systemBackground))
         .onAppear { lines = Log.recentEntries(limit: 120) }
+    }
+
+    private func runTests() {
+        running = true
+        testSummary = "running…"
+        Task {
+            guard let report = await host.runSelfTest() else {
+                testSummary = "the app is not started yet"
+                running = false
+                return
+            }
+            testSummary = report.summary
+            testResults = report.results
+            lines = Log.recentEntries(limit: 120)
+            running = false
+        }
     }
 
     private func field(_ name: String, _ value: String) -> some View {
@@ -199,12 +250,20 @@ final class WebHost: ObservableObject {
     // Kept alive for the app's lifetime: the vault holds the in-memory index
     // and the embedder holds loaded model assets, so neither should be rebuilt
     // per request.
+    private var selfTest: SelfTest?
     private var vault: Vault?
     private var embedding: EmbedderBox?
     private var capture: Capture?
     private var diagnostics: Diagnostics?
     private var chat: Chat?
     private var reminders: Reminders?
+
+    /// Runs the suite without going through HTTP, so a broken web view does
+    /// not take the tests with it.
+    func runSelfTest() async -> SelfTest.Report? {
+        guard let selfTest else { return nil }
+        return await selfTest.run()
+    }
 
     func togglePage() {
         page = (page == .app) ? .diag : .app
@@ -276,6 +335,10 @@ final class WebHost: ObservableObject {
             let diagnostics = Diagnostics(embedding: embedding)
             let chat = Chat(vault: vault, embedding: embedding, thresholds: { capture.thresholds })
             let reminders = Reminders(vault: vault)
+            let selfTest = SelfTest(
+                vault: vault, capture: capture, chat: chat,
+                embedding: embedding, intelligence: intelligence, reminders: reminders
+            )
 
             self.vault = vault
             self.embedding = embedding
@@ -283,6 +346,7 @@ final class WebHost: ObservableObject {
             self.diagnostics = diagnostics
             self.chat = chat
             self.reminders = reminders
+            self.selfTest = selfTest
 
             let routes = RouteTable(
                 diagnostics: diagnostics,
@@ -291,7 +355,8 @@ final class WebHost: ObservableObject {
                 embedding: embedding,
                 chat: chat,
                 reminders: reminders,
-                intelligence: intelligence
+                intelligence: intelligence,
+                selfTest: selfTest
             )
             await server.install(routes)
             await server.start()

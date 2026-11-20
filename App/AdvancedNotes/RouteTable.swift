@@ -26,6 +26,7 @@ final class RouteTable {
     /// main-actor-isolated, and the route closures are not, so building one
     /// inside a closure is a call across the boundary.
     private let intelligence: Intelligence
+    private let selfTest: SelfTest
 
     init(
         diagnostics: Diagnostics,
@@ -34,7 +35,8 @@ final class RouteTable {
         embedding: EmbedderBox,
         chat: Chat,
         reminders: Reminders,
-        intelligence: Intelligence
+        intelligence: Intelligence,
+        selfTest: SelfTest
     ) {
         self.diagnostics = diagnostics
         self.vault = vault
@@ -43,6 +45,7 @@ final class RouteTable {
         self.chat = chat
         self.reminders = reminders
         self.intelligence = intelligence
+        self.selfTest = selfTest
     }
 
     func install(on server: HTTPServer) async {
@@ -52,6 +55,7 @@ final class RouteTable {
         await installNotes(on: server)
         await installCapture(on: server)
         await installChat(on: server)
+        await installChecklists(on: server)
         await installStubs(on: server)
         await installDiagnostics(on: server)
 
@@ -486,7 +490,9 @@ final class RouteTable {
         await server.appendRoute("GET /api/links") { _ in Respond.json(API.Links(links: [])) }
         await server.appendRoute("GET /api/garden") { _ in Respond.json(API.Garden(proposals: [])) }
         await server.appendRoute("GET /api/graph") { _ in Respond.json(API.Graph(nodes: [], links: [])) }
-        await server.appendRoute("POST /api/undo") { _ in Respond.json(API.Undone(undone: nil)) }
+        await server.appendRoute("POST /api/undo") { [vault, embedding, reminders] _ in
+            Respond.json(await Undo.perform(vault: vault, embedding: embedding, reminders: reminders))
+        }
 
         // Personal notes is the WhatsApp import, prepared by hand on the
         // laptop. It has no meaning here.
@@ -495,7 +501,105 @@ final class RouteTable {
         }
     }
 
+    private func installChecklists(on server: HTTPServer) async {
+        // Tick or untick one line. The page sends the line number AND the
+        // text; the text is what actually identifies the item, because the
+        // page may be a moment out of date and toggling the wrong line
+        // silently is the failure worth avoiding.
+        await server.appendRoute("POST /api/list/item") { [vault] request in
+            let body = try await Respond.body(request)
+            let id = body["id"] as? String ?? ""
+            let line = body["line"] as? Int ?? -1
+            let text = body["text"] as? String ?? ""
+            let done = body["done"] as? Bool ?? true
+
+            guard var entry = await vault.entry(id) else {
+                return Respond.failure("not found", status: .notFound)
+            }
+            let today = String(Timestamp.utcNow().prefix(10))
+            guard let updated = Checklist.setDone(
+                entry.note.body, line: line, text: text, done: done, today: today
+            ) else {
+                return Respond.failure("That item changed. Open the note to see it.", status: .conflict)
+            }
+
+            await vault.recordTick(id: id, previousBody: entry.note.body)
+            entry.note.body = updated
+            entry.note.updated = Timestamp.utcNow()
+            _ = try? await vault.save(
+                entry.note, topic: entry.note.primaryTopic,
+                vector: entry.vector, needsReview: entry.needsReview
+            )
+
+            let progress = Checklist.progress(in: updated) ?? [0, 0]
+            return Respond.jsonObject(["ok": true, "progress": progress])
+        }
+
+        // Adding to a note the user named, rather than making a new one.
+        await server.appendRoute("POST /api/note/append") { [vault, embedding] request in
+            let body = try await Respond.body(request)
+            let id = body["id"] as? String ?? ""
+            let text = (body["text"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard var entry = await vault.entry(id), !text.isEmpty else {
+                return Respond.failure("id and text required", status: .badRequest)
+            }
+            entry.note.body = entry.note.body.isEmpty ? text : entry.note.body + "
+" + text
+            entry.note.updated = Timestamp.utcNow()
+            let vector = await embedding.embed(entry.note.embeddingText)
+            let path = (try? await vault.save(
+                entry.note, topic: entry.note.primaryTopic,
+                vector: vector, needsReview: entry.needsReview, recordUndo: true
+            )) ?? entry.path
+            return await Respond.json(API.NoteDetail(
+                entry.note, path: path, needsReview: entry.needsReview, related: []
+            ))
+        }
+
+        // Drag to arrange. Fractional positions mean a drop between two notes
+        // never has to renumber the ones around it.
+        await server.appendRoute("POST /api/note/order") { [vault] request in
+            let body = try await Respond.body(request)
+            let id = body["id"] as? String ?? ""
+            guard var entry = await vault.entry(id) else {
+                return Respond.failure("not found", status: .notFound)
+            }
+            var before: Double?
+            var after: Double?
+            if let neighbour = body["before"] as? String {
+                before = await vault.entry(neighbour)?.note.order
+            }
+            if let neighbour = body["after"] as? String {
+                after = await vault.entry(neighbour)?.note.order
+            }
+            let position = Self.midpoint(before: before, after: after)
+
+            entry.note.order = position
+            entry.note.updated = Timestamp.utcNow()
+            _ = try? await vault.save(
+                entry.note, topic: entry.note.primaryTopic,
+                vector: entry.vector, needsReview: entry.needsReview
+            )
+            return Respond.jsonObject(["ok": true, "pos": position])
+        }
+    }
+
+    /// A position between two neighbours, or just outside the end ones.
+    nonisolated static func midpoint(before: Double?, after: Double?) -> Double {
+        switch (before, after) {
+        case let (.some(a), .some(b)): return (a + b) / 2
+        case let (.some(a), .none): return a - 1
+        case let (.none, .some(b)): return b + 1
+        case (.none, .none): return 0
+        }
+    }
+
     private func installDiagnostics(on server: HTTPServer) async {
+        // The on-device test run. Writes real notes and removes them again.
+        await server.appendRoute("POST /api/selftest") { [selfTest] _ in
+            Respond.json(await selfTest.run())
+        }
+
         await server.appendRoute("GET /api/diag") { [diagnostics] _ in
             Respond.json(await diagnostics.report())
         }
