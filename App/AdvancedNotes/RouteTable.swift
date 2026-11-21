@@ -717,7 +717,7 @@ final class RouteTable {
             guard line >= 0, line < lines.count else {
                 return Respond.failure("That item moved.", status: .conflict)
             }
-            let indent = String(lines[line].prefix(while: { $0 == " " || $0 == "	" }))
+            let indent = String(lines[line].prefix(while: { $0 == " " || $0 == "\t" }))
             lines[line] = indent + Checklist.render(items[index])
 
             entry.note.body = lines.joined(separator: "\n")
