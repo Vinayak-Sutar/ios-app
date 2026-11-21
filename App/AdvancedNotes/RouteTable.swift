@@ -397,6 +397,18 @@ final class RouteTable {
         }
     }
 
+    /// Every note that is a checklist.
+    ///
+    /// One main-actor hop for the whole list rather than one per note: the
+    /// per-element version does not compile anyway, because a `map` closure is
+    /// synchronous and nonisolated.
+    @MainActor
+    private static func allLists(_ vault: Vault) -> [[String: Any]] {
+        vault.notes()
+            .filter { $0.note.kind == "list" || Checklist.progress(in: $0.note.body) != nil }
+            .map { listBrief($0) }
+    }
+
     /// A to-do list as the To-do lists page draws it: the note, plus progress
     /// and whatever deadline it carries.
     @MainActor
@@ -581,10 +593,7 @@ final class RouteTable {
         // Both of these are derived from the notes every time rather than
         // stored. Nothing to keep in step, and nothing a rebuild can lose.
         await server.appendRoute("GET /api/lists") { [vault] _ in
-            let lists = await vault.notes().filter { entry in
-                entry.note.kind == "list" || Checklist.progress(in: entry.note.body) != nil
-            }
-            return await Respond.jsonObject(["lists": lists.map { Self.listBrief($0) }])
+            await Respond.jsonObject(["lists": Self.allLists(vault)])
         }
 
         await server.appendRoute("GET /api/links") { [vault] _ in

@@ -244,7 +244,9 @@ public enum Readability {
 }
 
 extension String {
-    func ifEmpty(_ fallback: String) -> String {
+    /// `public` because the app layer uses it too — a site name falling back
+    /// to a host, a title falling back to a URL.
+    public func ifEmpty(_ fallback: String) -> String {
         isEmpty ? fallback : self
     }
 }
