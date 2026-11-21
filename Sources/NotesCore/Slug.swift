@@ -29,6 +29,27 @@ public enum Slug {
     /// in Python, so "straße" files as `strasse` rather than `strae`. Harmless
     /// either way — the frontmatter `id` identifies a note, not its filename,
     /// and the Python app rebuilds its index from frontmatter alone.
+    /// The folded words of a name, with no "untitled" fallback.
+    ///
+    /// `slugify` substitutes "untitled" for an empty result, which is right
+    /// for a filename and wrong for a key: it turns an empty name into a real
+    /// token that then gets stemmed to "untitl". Callers that need to know
+    /// a name folded to *nothing* use this.
+    public static func tokens(_ text: String) -> [String] {
+        var out: [String] = []
+        var current = ""
+        for scalar in text.lowercased().unicodeScalars {
+            let folded = fold(scalar)
+            if folded.isEmpty {
+                if !current.isEmpty { out.append(current); current = "" }
+            } else {
+                current += folded
+            }
+        }
+        if !current.isEmpty { out.append(current) }
+        return out
+    }
+
     public static func slugify(_ text: String) -> String {
         var out = ""
         var lastWasDash = false

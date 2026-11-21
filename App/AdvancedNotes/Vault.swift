@@ -31,6 +31,14 @@ final class Vault {
     /// Every change that can be taken back. In memory only: undo is for the
     /// action you just regretted, not for history.
     var journal = Journal()
+
+    /// Names the gate has refused, and what they resolved to.
+    ///
+    /// A synonym turned down once resolves instantly forever after, which is
+    /// what stops the same argument recurring every time a note arrives.
+    /// Rebuilt from nothing on launch: losing them costs a few string
+    /// comparisons, not correctness.
+    var aliases: [String: String] = [:]
     /// Collection path -> running centroid and member count.
     private(set) var centroids: [String: (vector: [Float], count: Int)] = [:]
 
@@ -277,6 +285,17 @@ final class Vault {
     /// Remember a checklist body before it is ticked, so the tick can be
     /// taken back without re-embedding: ticking does not change what a note
     /// is about.
+    /// Collections with their centroids, for the gate's content check.
+    func gateCandidates() -> [Gate.Existing] {
+        collectionPaths.map { path in
+            Gate.Existing(
+                path: path,
+                noteCount: centroids[path]?.count ?? 0,
+                centroid: centroids[path]?.vector ?? []
+            )
+        }
+    }
+
     func recordTick(id: String, previousBody: String) {
         journal.record(.ticked(id: id, body: previousBody), at: Timestamp.utcNow())
     }

@@ -172,6 +172,12 @@ final class Capture {
                 choice = .noneFit
             }
 
+            // A proposed new collection goes through the full gate rather
+            // than the two checks Router does: alias, exact name, normalised
+            // key, near key, containment, content similarity, then the cap.
+            if case let .newCollection(proposed) = choice {
+                return await gated(proposed, candidates: candidates)
+            }
             return Router.apply(
                 choice: choice,
                 candidates: candidates,
@@ -185,6 +191,51 @@ final class Capture {
             Log.model.error("capture reading failed: \(error.localizedDescription, privacy: .public)")
             return Router.decideFromRetrieval(candidates, thresholds)
                 .withReason("the model declined; used retrieval instead")
+        }
+    }
+
+    /// Run a proposed collection name through the anti-sprawl gate.
+    ///
+    /// The name is embedded ALONE for the content check. Never the name plus
+    /// the model's reasoning: a model that emits boilerplate rationale makes
+    /// every proposal vector nearly identical, and the gate then merges
+    /// unrelated collections into whichever one happened to exist first. That
+    /// was a real bug in the app this is ported from, and it is invisible
+    /// until the taxonomy is already ruined.
+    private func gated(_ proposed: String, candidates: [Candidate]) async -> Decision {
+        let nameVector = await embedding.embed(proposed)
+        let outcome = Gate.decide(
+            proposed: proposed,
+            existing: vault.gateCandidates(),
+            aliases: vault.aliases,
+            proposedVector: nameVector,
+            thresholds: thresholds
+        )
+        if let alias = Gate.aliasToRecord(for: proposed, outcome: outcome) {
+            vault.aliases[alias.key] = alias.path
+        }
+
+        switch outcome {
+        case let .useExisting(path, why):
+            return Decision(
+                topicPath: path, outcome: .review, confidence: 0.5,
+                reason: why, usedModel: true
+            )
+        case let .nestUnder(parent, name, why):
+            return Decision(
+                topicPath: parent + "/" + Slug.safeDirname(name),
+                outcome: .review, confidence: 0.45,
+                reason: why, usedModel: true, createdCollection: true
+            )
+        case let .create(name):
+            // A brand-new collection is never a silent decision.
+            return Decision(
+                topicPath: name, outcome: .review, confidence: 0.4,
+                reason: "new collection \"\(name)\"", usedModel: true, createdCollection: true
+            )
+        case let .refuse(why):
+            return Router.decideFromRetrieval(candidates, thresholds, usedModel: true)
+                .withReason(why)
         }
     }
 
