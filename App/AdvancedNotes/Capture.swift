@@ -15,6 +15,7 @@ final class Capture {
     private let vault: Vault
     private let intelligence: Intelligence
     private let embedding: EmbedderBox
+    private let links: LinkFetcher
     var thresholds: Thresholds
 
     /// Notes to accumulate before the vault is allowed to grow collections.
@@ -34,10 +35,17 @@ final class Capture {
     /// cluster, and whether the model picks well from them.
     var retrievalOnly = false
 
-    init(vault: Vault, intelligence: Intelligence, embedding: EmbedderBox, thresholds: Thresholds) {
+    init(
+        vault: Vault,
+        intelligence: Intelligence,
+        embedding: EmbedderBox,
+        links: LinkFetcher = LinkFetcher(),
+        thresholds: Thresholds
+    ) {
         self.vault = vault
         self.intelligence = intelligence
         self.embedding = embedding
+        self.links = links
         self.thresholds = thresholds
     }
 
@@ -60,7 +68,31 @@ final class Capture {
         )
         var path = (try? vault.save(note, topic: nil, vector: [], needsReview: false)) ?? ""
 
-        // 2. Embed. Without a vector there is nothing to compare, so the note
+        // 2. If it is a link, fetch the page so there is something to file on.
+        //    After the save, never before: a slow or dead site must cost the
+        //    page text, not the note.
+        if let url = LinkText.firstURL(in: text) {
+            note.kind = "link"
+            note.source = url.absoluteString
+            do {
+                let article = try await links.fetch(url)
+                if !article.isEmpty {
+                    note.body = LinkText.body(userText: text, url: url, article: article)
+                    if !article.title.isEmpty, Self.provisionalTitle(from: text) == text || text == url.absoluteString {
+                        note.title = String(article.title.prefix(80))
+                    }
+                    note.updated = Timestamp.utcNow()
+                    path = (try? vault.save(note, topic: nil, vector: [], needsReview: false)) ?? path
+                }
+            } catch {
+                // A refusal is normal: the host may need an account, or be
+                // down. The note keeps the bare URL and files on what little
+                // that gives.
+                Log.vault.notice("link not fetched: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+
+        // 3. Embed. Without a vector there is nothing to compare, so the note
         //    stays in Inbox — which is the honest answer, not a failure.
         let vector = await embedding.embed(note.embeddingText)
         if vector.isEmpty {
@@ -69,7 +101,7 @@ final class Capture {
             return Outcome(note: note, path: path, decision: decision, relatedCount: 0)
         }
 
-        // 3. Retrieve. Rank by similarity to each collection's centroid.
+        // 4. Retrieve. Rank by similarity to each collection's centroid.
         let candidates = vault.candidates(for: vector, limit: thresholds.topicCandidates)
         let coldStart = max(0, coldStartNotes - vault.entries.count)
 
@@ -91,7 +123,7 @@ final class Capture {
             decision = await decideWithModel(text: text, candidates: candidates)
         }
 
-        // 4. Apply.
+        // 5. Apply.
         note.topics = decision.topicPath.map { [$0] } ?? []
         note.updated = Timestamp.utcNow()
         if let better = pendingTitle { note.title = better; pendingTitle = nil }

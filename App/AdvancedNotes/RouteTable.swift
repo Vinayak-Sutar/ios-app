@@ -397,6 +397,98 @@ final class RouteTable {
         }
     }
 
+    /// A to-do list as the To-do lists page draws it: the note, plus progress
+    /// and whatever deadline it carries.
+    @MainActor
+    private static func listBrief(_ entry: Vault.Entry) -> [String: Any] {
+        let progress = Checklist.progress(in: entry.note.body) ?? [0, 0]
+        var out: [String: Any] = [
+            "id": entry.note.id,
+            "title": entry.note.title.isEmpty ? "Untitled" : entry.note.title,
+            "kind": "list",
+            "status": entry.note.status,
+            "topic": entry.note.primaryTopic as Any? ?? NSNull(),
+            "path": entry.path,
+            "created": entry.note.created,
+            "updated": entry.note.updated,
+            "snippet": API.NoteBrief.snippet(from: entry.note.body),
+            "done": entry.note.status == "done",
+            "review": entry.needsReview,
+            "remind": entry.note.remind != nil,
+            "due": entry.note.due as Any? ?? NSNull(),
+            "progress": progress,
+            "lines": API.NoteBrief.previewLines(from: entry.note.body).map { line in
+                [
+                    "t": line.t,
+                    "text": line.text,
+                    "done": line.done as Any? ?? NSNull(),
+                    "line": line.line as Any? ?? NSNull()
+                ]
+            },
+            "list": [
+                "done": progress[0],
+                "total": progress[1],
+                "due": entry.note.due as Any? ?? NSNull(),
+                "checkin": entry.note.checkin as Any? ?? NSNull(),
+                "quietUntil": entry.note.quietUntil as Any? ?? NSNull(),
+                "repeat": entry.note.repeatRule as Any? ?? NSNull(),
+                "parent": entry.note.parent as Any? ?? NSNull(),
+                "children": [String](),
+                "sections": [[String: Any]]()
+            ]
+        ]
+        out["media"] = entry.note.media as Any? ?? NSNull()
+        out["source"] = entry.note.source as Any? ?? NSNull()
+        return out
+    }
+
+    /// Every link written in any note, one tile each, listing the notes it
+    /// appears in.
+    ///
+    /// Worked out from the notes on every request rather than kept in a
+    /// table: there is nothing to keep in step, and nothing a rebuild can
+    /// lose. The same article shared two ways collapses to one tile because
+    /// the key has its tracking parameters stripped.
+    @MainActor
+    private static func linkTiles(_ vault: Vault) -> [[String: Any]] {
+        var tiles: [String: [String: Any]] = [:]
+        var order: [String] = []
+
+        for entry in vault.notes() {
+            // Only the user's own text, never a fetched page's body — that
+            // would turn every outbound link on an article into a tile.
+            let ownText = entry.note.source.map { source in
+                entry.note.body.components(separatedBy: "\n\n").first ?? source
+            } ?? entry.note.body
+
+            var urls = LinkText.allURLs(in: ownText)
+            if let source = entry.note.source, let url = URL(string: source) {
+                urls = [url] + urls.filter { LinkText.canonical($0) != LinkText.canonical(url) }
+            }
+
+            for url in urls {
+                let key = LinkText.canonical(url)
+                if tiles[key] == nil {
+                    order.append(key)
+                    tiles[key] = [
+                        "key": key,
+                        "url": url.absoluteString,
+                        "site": url.host ?? "link",
+                        "title": entry.note.title.isEmpty ? (url.host ?? url.absoluteString) : entry.note.title,
+                        "notes": [[String: Any]]()
+                    ]
+                }
+                var notes = tiles[key]?["notes"] as? [[String: Any]] ?? []
+                notes.append([
+                    "id": entry.note.id,
+                    "title": entry.note.title.isEmpty ? "Untitled" : entry.note.title
+                ])
+                tiles[key]?["notes"] = notes
+            }
+        }
+        return order.compactMap { tiles[$0] }
+    }
+
     nonisolated private static func captureResult(_ outcome: Capture.Outcome) -> API.CaptureResult {
         API.CaptureResult(
             id: outcome.note.id,
@@ -486,8 +578,18 @@ final class RouteTable {
     /// Right shape, nothing in it. The page has designed empty states for all
     /// of these, so they read as "nothing here yet" rather than failing.
     private func installStubs(on server: HTTPServer) async {
-        await server.appendRoute("GET /api/lists") { _ in Respond.json(API.Lists(lists: [])) }
-        await server.appendRoute("GET /api/links") { _ in Respond.json(API.Links(links: [])) }
+        // Both of these are derived from the notes every time rather than
+        // stored. Nothing to keep in step, and nothing a rebuild can lose.
+        await server.appendRoute("GET /api/lists") { [vault] _ in
+            let lists = await vault.notes().filter { entry in
+                entry.note.kind == "list" || Checklist.progress(in: entry.note.body) != nil
+            }
+            return await Respond.jsonObject(["lists": lists.map { Self.listBrief($0) }])
+        }
+
+        await server.appendRoute("GET /api/links") { [vault] _ in
+            await Respond.jsonObject(["links": Self.linkTiles(vault)])
+        }
         await server.appendRoute("GET /api/garden") { _ in Respond.json(API.Garden(proposals: [])) }
         await server.appendRoute("GET /api/graph") { _ in Respond.json(API.Graph(nodes: [], links: [])) }
         await server.appendRoute("POST /api/undo") { [vault, embedding, reminders] _ in
