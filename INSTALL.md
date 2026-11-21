@@ -16,13 +16,30 @@ Apple Mobile Device Support is already on this machine (checked), so you do
 
 ## Every build
 
-**2. Download the build.** Open the latest green **ios** run in
-[Actions](https://github.com/Vinayak-Sutar/ios-app/actions), scroll to
-**Artifacts**, download `AdvancedNotes-unsigned-ipa`. You must be signed in to
-GitHub or the download link will not appear.
+**2. Download the build.** Click by click, because the Artifacts section is
+not where you would expect:
 
-GitHub wraps artifacts in a ZIP, so **unzip it** — you want the `.ipa` inside,
-not the `.zip`.
+```
+github.com/Vinayak-Sutar/ios-app
+  └─ Actions            ← tab along the top, after Code / Issues / Pull requests
+      └─ ios            ← in the left sidebar, under "All workflows"
+          └─ the top run with a green tick
+              └─ scroll to the BOTTOM of that page
+                  └─ Artifacts  →  AdvancedNotes-unsigned-ipa
+```
+
+Three things that catch people out:
+
+- **You must be signed in to GitHub.** Signed out, the Artifacts section does
+  not render at all, which looks exactly like the build not producing one.
+- **Stay on the run summary page.** Clicking into the "Build unsigned .ipa"
+  job shows the logs, and Artifacts is not on that view. Use the browser back
+  button to return.
+- **The list mixes two workflows.** `core` runs the tests and has no artifact;
+  you want the one named **ios**.
+
+GitHub wraps artifacts in a ZIP, so **unzip it** — Sideloadly needs the `.ipa`
+inside, not the `.zip`.
 
 **3. Connect the phone.** Plug in, unlock, and tap **Trust This Computer** if
 asked.
