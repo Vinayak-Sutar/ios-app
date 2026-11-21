@@ -27,6 +27,7 @@ final class RouteTable {
     /// inside a closure is a call across the boundary.
     private let intelligence: Intelligence
     private let selfTest: SelfTest
+    private let images: ImageCapture
 
     init(
         diagnostics: Diagnostics,
@@ -36,7 +37,8 @@ final class RouteTable {
         chat: Chat,
         reminders: Reminders,
         intelligence: Intelligence,
-        selfTest: SelfTest
+        selfTest: SelfTest,
+        images: ImageCapture
     ) {
         self.diagnostics = diagnostics
         self.vault = vault
@@ -46,6 +48,7 @@ final class RouteTable {
         self.reminders = reminders
         self.intelligence = intelligence
         self.selfTest = selfTest
+        self.images = images
     }
 
     func install(on server: HTTPServer) async {
@@ -103,6 +106,11 @@ final class RouteTable {
         await server.appendRoute("GET /local.js") { _ in Respond.bundled("local", "js") }
 
         await server.appendRoute("GET /diag") { _ in Respond.bundled("diag", "html") }
+
+        // Images, served out of the vault's media folder.
+        await server.appendRoute("GET /media/*") { [vault] request in
+            await Self.media(vault, path: request.path)
+        }
 
         // Deliberately 404: the page registers a service worker only because
         // loopback is a secure context, and its .catch swallows the failure.
@@ -412,6 +420,44 @@ final class RouteTable {
             if blank { try? await vault.delete(id) }
             return Respond.json(["discarded": blank])
         }
+    }
+
+    /// Serve one file from the vault's media folder.
+    ///
+    /// The filename is taken as a basename and nothing else: a request may ask
+    /// for any name it likes, and joining an attacker-chosen path onto the
+    /// vault root is how a server starts handing out arbitrary files.
+    @MainActor
+    private static func media(_ vault: Vault, path: String) -> HTTPResponse {
+        let requested = path
+            .removingPercentEncoding ?? path
+        guard let name = requested.components(separatedBy: "/").last, !name.isEmpty,
+              !name.contains(".."), !name.contains("\\") else {
+            return Respond.failure("not found", status: .notFound)
+        }
+
+        let url = vault.root
+            .appendingPathComponent(".mnemo/media", isDirectory: true)
+            .appendingPathComponent(name)
+
+        // And verified afterwards, rather than trusted: the resolved path has
+        // to still be inside the media folder.
+        let base = vault.root.appendingPathComponent(".mnemo/media").standardizedFileURL.path
+        guard url.standardizedFileURL.path.hasPrefix(base),
+              let data = try? Data(contentsOf: url) else {
+            return Respond.failure("not found", status: .notFound)
+        }
+
+        let format = ImageFormat.sniff([UInt8](data.prefix(16)))
+        return HTTPResponse(
+            statusCode: .ok,
+            headers: [
+                .contentType: format?.contentType ?? "application/octet-stream",
+                HTTPHeader("Cache-Control"): "private, max-age=31536000",
+                HTTPHeader("X-Content-Type-Options"): "nosniff"
+            ],
+            body: data
+        )
     }
 
     /// Every note that is a checklist.
@@ -727,6 +773,34 @@ final class RouteTable {
                 vector: entry.vector, needsReview: entry.needsReview
             )
             return Respond.jsonObject(["ok": true])
+        }
+
+        // An image, sent as base64 JSON rather than multipart - which is how
+        // the page does it, so the bridge matches rather than arguing.
+        await server.appendRoute("POST /api/upload") { [images] request in
+            let body = try await Respond.body(request)
+            let data = body["data"] as? String ?? ""
+            let caption = body["text"] as? String ?? ""
+            guard !data.isEmpty else {
+                return Respond.failure("no image data", status: .badRequest)
+            }
+            do {
+                let result = try await images.save(dataURL: data, caption: caption)
+                return Respond.jsonObject([
+                    "id": result.note.id,
+                    "title": result.note.title,
+                    "topic": result.decision.topicPath as Any? ?? NSNull(),
+                    "outcome": result.decision.outcome.rawValue,
+                    "media": result.media,
+                    "ocr": result.transcript.isEmpty ? NSNull() : result.transcript,
+                    "description": NSNull(),
+                    "error": NSNull(),
+                    "enrichError": NSNull()
+                ])
+            } catch {
+                Log.vault.error("upload failed: \(error.localizedDescription, privacy: .public)")
+                return Respond.failure("\(error)", status: .unprocessableContent)
+            }
         }
 
         // Adding to a note the user named, rather than making a new one.

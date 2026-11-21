@@ -70,13 +70,19 @@ enum API {
         var progress: [Int]?
         var related: [NoteBrief]
         var links: [String]
+        /// Text Vision found in the image. The page renders it in its own
+        /// section with a copy button.
+        var ocr: String?
+        /// What the picture shows. Nil until iOS 27, where the on-device
+        /// model can finally see images.
+        var description: String?
 
         // `repeat` is a Swift keyword, so the property carries a trailing
         // underscore and is renamed on the way out.
         enum CodingKeys: String, CodingKey {
             case id, title, kind, status, path, topic, topics, snippet, body
             case created, updated, review, due, remind, done, media, source
-            case lines, progress, related, links
+            case lines, progress, related, links, ocr, description
             case repeat_ = "repeat"
         }
     }
@@ -275,5 +281,18 @@ extension API.NoteDetail {
         self.progress = brief.progress
         self.related = related
         self.links = []
+
+        // An image note keeps the caption and the machine-written text in one
+        // Markdown body; the page wants them apart, so it can let you edit
+        // your own words without touching a transcript you did not write.
+        if note.media != nil {
+            let parts = ImageNote.split(note.body)
+            self.body = parts.userText
+            self.ocr = parts.transcript.isEmpty ? nil : parts.transcript
+            self.description = parts.description.isEmpty ? nil : parts.description
+        } else {
+            self.ocr = nil
+            self.description = nil
+        }
     }
 }

@@ -335,6 +335,7 @@ final class WebHost: ObservableObject {
             let diagnostics = Diagnostics(embedding: embedding)
             let chat = Chat(vault: vault, embedding: embedding, thresholds: { capture.thresholds })
             let reminders = Reminders(vault: vault)
+            let images = ImageCapture(vault: vault, capture: capture, embedding: embedding)
             let selfTest = SelfTest(
                 vault: vault, capture: capture, chat: chat,
                 embedding: embedding, intelligence: intelligence, reminders: reminders
@@ -356,7 +357,8 @@ final class WebHost: ObservableObject {
                 chat: chat,
                 reminders: reminders,
                 intelligence: intelligence,
-                selfTest: selfTest
+                selfTest: selfTest,
+                images: images
             )
             await server.install(routes)
             await server.start()
