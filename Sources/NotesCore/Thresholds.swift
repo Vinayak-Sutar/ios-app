@@ -69,17 +69,30 @@ public struct Thresholds: Codable, Sendable, Equatable {
         self.maxCollections = maxCollections
     }
 
-    /// Starting guess for `NLContextualEmbedding`, to be replaced by whatever
-    /// the sliders settle on. Pitched between the two measured presets because
-    /// a BERT-style space sits closer to nomic's than to feature hashing's.
+    /// Measured on an iPhone 17, iOS 26.6, 2026-11-21.
+    ///
+    /// The first guess was pitched at `fileFloor` 0.50 on the reasoning that a
+    /// BERT space sits near nomic's. The device said otherwise: unrelated
+    /// notes score **0.840** and related ones **0.896**. Everything clears
+    /// 0.50, so the floors did no work at all and only the margin decided
+    /// anything — on a gap of 0.055.
+    ///
+    /// That is the whole argument for calibrating rather than reasoning. A
+    /// threshold is a property of the embedder's geometry, and this one's
+    /// geometry is compressed into the top sixth of the range.
+    ///
+    /// These are still provisional: six sentences is a measurement, not a
+    /// calibration. `minMargin` is the number that matters here, because the
+    /// floors sit so close together that the winner beating the runner-up is
+    /// nearly the only signal available.
     public static func appleGuess(embedderID: String) -> Thresholds {
         Thresholds(
             embedderID: embedderID,
-            fileFloor: 0.50,
-            reviewFloor: 0.58,
-            minMargin: 0.04,
-            dedupeName: 0.65,
-            dedupeCentroid: 0.60
+            fileFloor: 0.820,
+            reviewFloor: 0.865,
+            minMargin: 0.012,
+            dedupeName: 0.900,
+            dedupeCentroid: 0.880
         )
     }
 

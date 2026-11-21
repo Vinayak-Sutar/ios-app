@@ -65,6 +65,64 @@ public enum Vectors {
         return l2Normalise(acc.map { Float($0 / total) })
     }
 
+    /// Subtract the shared mean direction from a set of vectors.
+    ///
+    /// Mean-pooled transformer embeddings have a large common component —
+    /// every vector points broadly the same way, because every sentence shares
+    /// the same function words and the same model bias. The result is that
+    /// unrelated texts score ~0.84 and related ones ~0.90, so almost all of
+    /// the cosine range is wasted and only a sliver carries meaning.
+    ///
+    /// Removing the mean reclaims that range. It is the "all-but-the-top"
+    /// trick, and the reason it matters here is that a 0.05 margin leaves no
+    /// room for a threshold to sit in.
+    ///
+    /// Note this is a property of a *set*, not of one vector: the mean has to
+    /// come from the corpus, so centring cannot be applied when embedding a
+    /// note in isolation without storing that mean alongside.
+    public static func centred(_ vectors: [[Float]]) -> [[Float]] {
+        guard let first = vectors.first, !first.isEmpty else { return vectors }
+        let dim = first.count
+        let usable = vectors.filter { $0.count == dim }
+        guard usable.count > 1 else { return vectors }
+
+        var mean = [Double](repeating: 0, count: dim)
+        for vector in usable {
+            for i in 0..<dim { mean[i] += Double(vector[i]) }
+        }
+        for i in 0..<dim { mean[i] /= Double(usable.count) }
+
+        return vectors.map { vector in
+            guard vector.count == dim else { return vector }
+            var out = [Float](repeating: 0, count: dim)
+            for i in 0..<dim { out[i] = Float(Double(vector[i]) - mean[i]) }
+            return l2Normalise(out)
+        }
+    }
+
+    /// Centre one vector against a mean measured earlier.
+    public static func centred(_ vector: [Float], mean: [Float]) -> [Float] {
+        guard vector.count == mean.count, !vector.isEmpty else { return vector }
+        var out = [Float](repeating: 0, count: vector.count)
+        for i in 0..<vector.count { out[i] = vector[i] - mean[i] }
+        return l2Normalise(out)
+    }
+
+    /// The unnormalised mean direction of a set — what `centred` removes, and
+    /// what has to be stored to centre a single new vector later.
+    public static func meanDirection(_ vectors: [[Float]]) -> [Float] {
+        guard let first = vectors.first, !first.isEmpty else { return [] }
+        let dim = first.count
+        var acc = [Double](repeating: 0, count: dim)
+        var counted = 0
+        for vector in vectors where vector.count == dim {
+            for i in 0..<dim { acc[i] += Double(vector[i]) }
+            counted += 1
+        }
+        guard counted > 0 else { return [] }
+        return acc.map { Float($0 / Double(counted)) }
+    }
+
     /// Fold one new member into a running centroid without keeping history.
     /// O(dim), which is why collections can hold any number of notes.
     public static func foldIntoCentroid(_ centroid: [Float], count: Int, adding v: [Float]) -> [Float] {

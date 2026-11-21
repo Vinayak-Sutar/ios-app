@@ -123,3 +123,64 @@ final class VectorsTests: XCTestCase {
         XCTAssertEqual(Vectors.unpack(Data([1, 2])), [])
     }
 }
+
+/// Centring reclaims the cosine range that a shared mean direction wastes.
+///
+/// Measured on the device, Apple's embedder scored unrelated notes at 0.840
+/// and related ones at 0.896 — a 0.055 gap, with almost the whole range
+/// consumed by a component every vector shares.
+final class CentringTests: XCTestCase {
+
+    /// Vectors that all lean the same way, with a small distinguishing part.
+    func leaning(_ signal: [Float]) -> [Float] {
+        var v = [Float](repeating: 0, count: signal.count + 1)
+        v[0] = 3.0                                   // the shared component
+        for (i, x) in signal.enumerated() { v[i + 1] = x }
+        return Vectors.l2Normalise(v)
+    }
+
+    func testCentringWidensTheGapBetweenRelatedAndUnrelated() {
+        let a1 = leaning([1, 0, 0])
+        let a2 = leaning([0.9, 0.1, 0])
+        let b1 = leaning([0, 0, 1])
+
+        let rawSame = Vectors.cosine(a1, a2)
+        let rawDifferent = Vectors.cosine(a1, b1)
+        let rawGap = rawSame - rawDifferent
+
+        let centred = Vectors.centred([a1, a2, b1])
+        let centredGap = Vectors.cosine(centred[0], centred[1]) - Vectors.cosine(centred[0], centred[2])
+
+        XCTAssertGreaterThan(centredGap, rawGap, "centring should widen the gap, not narrow it")
+    }
+
+    func testCentringLeavesSingleVectorsAlone() {
+        let only = [Vectors.l2Normalise([1, 2, 3])]
+        XCTAssertEqual(Vectors.centred(only), only)
+        XCTAssertEqual(Vectors.centred([]), [])
+    }
+
+    func testCentringProducesUnitVectors() {
+        let set = [leaning([1, 0, 0]), leaning([0, 1, 0]), leaning([0, 0, 1])]
+        for v in Vectors.centred(set) {
+            XCTAssertEqual(Vectors.cosine(v, v), 1.0, accuracy: 1e-6)
+        }
+    }
+
+    /// Centring one vector against a stored mean must match centring the set,
+    /// or a note embedded later would live in a different space from the ones
+    /// already filed.
+    func testSingleVectorCentringMatchesTheSetForm() {
+        let set = [leaning([1, 0, 0]), leaning([0, 1, 0]), leaning([0, 0, 1])]
+        let mean = Vectors.meanDirection(set)
+        let viaSet = Vectors.centred(set)
+        for (index, vector) in set.enumerated() {
+            let viaMean = Vectors.centred(vector, mean: mean)
+            XCTAssertEqual(Vectors.cosine(viaSet[index], viaMean), 1.0, accuracy: 1e-5)
+        }
+    }
+
+    func testMeanDirectionOfNothingIsEmpty() {
+        XCTAssertEqual(Vectors.meanDirection([]), [])
+    }
+}

@@ -208,25 +208,74 @@ final class SelfTest {
         try expect(similarity > 0.9999, "same text scored \(similarity) against itself")
     }
 
+    /// Measures how far apart related and unrelated notes sit, raw and centred.
+    ///
+    /// Both, because the first run measured a gap of 0.055 with everything
+    /// scoring 0.84–0.90: mean-pooled transformer vectors share a large common
+    /// direction, so almost the whole cosine range is wasted and a threshold
+    /// has nowhere to sit. Centring removes that shared component. Whether it
+    /// helps *here* is a question for the device, not for my judgement — so it
+    /// reports both and lets the numbers decide.
     private func checkSeparation() async throws {
         guard embedding.info != nil else { throw Skip(why: "no embedder") }
-        let a1 = await embedding.embed("Malenia waterfowl dance timing, bloodhound step on the second swing")
-        let a2 = await embedding.embed("Finished the Elden Ring DLC on NG+ without summoning")
-        let b1 = await embedding.embed("Sourdough levain at 100 percent hydration doubles in five hours")
 
-        let same = Vectors.cosine(a1, a2)
-        let different = Vectors.cosine(a1, b1)
-        let gap = same - different
+        let gaming = [
+            "Malenia waterfowl dance timing, bloodhound step on the second swing",
+            "Finished the Elden Ring DLC on NG+ without summoning",
+            "The RTX 4070 undervolt saves 30 watts with no framerate loss"
+        ]
+        let cooking = [
+            "Sourdough levain at 100 percent hydration doubles in five hours",
+            "Banneton proofing overnight in the fridge gives a better crumb",
+            "Toast whole spices before grinding or the curry tastes flat"
+        ]
+
+        var vectors: [[Float]] = []
+        for text in gaming + cooking { vectors.append(await embedding.embed(text)) }
+        try expect(vectors.allSatisfy { !$0.isEmpty }, "an embedding came back empty")
+
+        func measure(_ set: [[Float]]) -> (same: Double, different: Double, gap: Double) {
+            var same: [Double] = []
+            var different: [Double] = []
+            for i in 0..<set.count {
+                for j in (i + 1)..<set.count {
+                    let sameTopic = (i < 3) == (j < 3)
+                    let score = Vectors.cosine(set[i], set[j])
+                    if sameTopic { same.append(score) } else { different.append(score) }
+                }
+            }
+            let a = same.reduce(0, +) / Double(max(1, same.count))
+            let b = different.reduce(0, +) / Double(max(1, different.count))
+            return (a, b, a - b)
+        }
+
+        let raw = measure(vectors)
+        let centred = measure(Vectors.centred(vectors))
 
         checks.append(Check(
             name: "   separation detail",
             status: "pass",
-            detail: String(format: "same topic %.3f, different %.3f, gap %.3f", same, different, gap),
+            detail: String(
+                format: "raw: same %.3f, diff %.3f, gap %.3f  |  centred: same %.3f, diff %.3f, gap %.3f",
+                raw.same, raw.different, raw.gap, centred.same, centred.different, centred.gap
+            ),
             ms: 0
         ))
-        // The threshold this asserts is deliberately low. It is not measuring
-        // quality, only that the vectors carry topic information at all.
-        try expect(gap > 0.01, String(format: "gap is %.3f — these vectors cannot separate topics", gap))
+        checks.append(Check(
+            name: "   centring verdict",
+            status: centred.gap > raw.gap ? "pass" : "skip",
+            detail: centred.gap > raw.gap
+                ? String(format: "centring widens the gap %.3f -> %.3f (%.1fx)", raw.gap, centred.gap, centred.gap / max(0.001, raw.gap))
+                : String(format: "centring does not help here (%.3f vs %.3f)", centred.gap, raw.gap),
+            ms: 0
+        ))
+
+        // Deliberately a low bar. This is not measuring quality, only that the
+        // vectors carry topic information at all.
+        try expect(
+            max(raw.gap, centred.gap) > 0.01,
+            String(format: "best gap is %.3f — these vectors cannot separate topics", max(raw.gap, centred.gap))
+        )
     }
 
     private func checkModelAvailable() throws {
@@ -273,29 +322,68 @@ final class SelfTest {
         )
     }
 
-    /// Two notes on one subject and one on another: the odd one out must not
-    /// land in the same collection as the pair. This is the actual product
-    /// claim, reduced to its smallest honest form.
+    /// Seed two collections, then file a note that plainly belongs in one.
+    ///
+    /// The first version of this check passed without testing anything: it
+    /// captured two notes into an empty vault, where there are no collections
+    /// to choose between, so "went to Inbox" was the only possible outcome and
+    /// the assertion was that the code ran. A green check that cannot fail is
+    /// worse than no check, because it is read as evidence.
     private func checkFiling() async throws {
         guard embedding.info != nil else { throw Skip(why: "no embedder") }
-        guard Intelligence.availability.isAvailable else { throw Skip(why: "model unavailable") }
 
         let originalColdStart = capture.coldStartNotes
         capture.coldStartNotes = 0
         defer { capture.coldStartNotes = originalColdStart }
 
-        let a = await capture.capture(text: "\(Self.marker) banneton proofing overnight gives a better crumb")
-        created.append(a.note.id)
-        let b = await capture.capture(text: "\(Self.marker) toast whole spices before grinding for curry")
-        created.append(b.note.id)
+        // Seed directly rather than through capture, so the collections exist
+        // regardless of how capture decides to file them.
+        let seeds: [(String, String)] = [
+            ("SelfTestCooking", "sourdough levain doubles in five hours at room temperature"),
+            ("SelfTestCooking", "banneton proofing overnight in the fridge gives a better crumb"),
+            ("SelfTestCooking", "toast whole spices before grinding or the curry tastes flat"),
+            ("SelfTestGaming", "malenia waterfowl dance timing is brutal, bloodhound step works"),
+            ("SelfTestGaming", "finished the elden ring dlc on NG+ without summoning"),
+            ("SelfTestGaming", "the rtx 4070 undervolt saves thirty watts with no framerate loss")
+        ]
+        for (collection, text) in seeds {
+            let note = Note(title: "\(Self.marker) \(text.prefix(30))", body: text)
+            let vector = await embedding.embed(note.embeddingText)
+            _ = try vault.save(note, topic: collection, vector: vector, needsReview: false)
+            created.append(note.id)
+        }
 
+        let probe = "\(Self.marker) the starter rose faster in a warm kitchen than in the fridge"
+        let vector = await embedding.embed(probe)
+        let candidates = vault.candidates(for: vector, limit: 8)
+
+        let best = candidates.first
+        let runnerUp = candidates.count > 1 ? candidates[1] : nil
         checks.append(Check(
             name: "   filing detail",
             status: "pass",
-            detail: "a -> \(a.decision.topicPath ?? "Inbox") (\(a.decision.outcome.rawValue)); "
-                + "b -> \(b.decision.topicPath ?? "Inbox") (\(b.decision.outcome.rawValue))",
+            detail: candidates
+                .prefix(3)
+                .map { String(format: "%@ %.3f", $0.path, $0.similarity) }
+                .joined(separator: ", "),
             ms: 0
         ))
+
+        try expect(best != nil, "no collections to choose from")
+        // The real claim: a baking note is nearer the baking collection than
+        // the gaming one. If retrieval cannot do this, no threshold saves it.
+        try expect(
+            best?.path == "SelfTestCooking",
+            "a baking note ranked \(best?.path ?? "nothing") first"
+        )
+        if let best, let runnerUp {
+            checks.append(Check(
+                name: "   filing margin",
+                status: "pass",
+                detail: String(format: "%.4f between first and second", best.similarity - runnerUp.similarity),
+                ms: 0
+            ))
+        }
     }
 
     private func checkChat() async throws {

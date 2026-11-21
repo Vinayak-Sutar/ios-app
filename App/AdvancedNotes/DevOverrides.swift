@@ -91,15 +91,15 @@ struct DevOverrides: Decodable {
             {
               "_comment": "Edit, then reopen the app. Delete a line to use the default.",
 
-              "_coldStartNotes": "notes before collections may form; default 20",
-              "coldStartNotes": 20,
+              "_coldStartNotes": "notes before collections may form; 20 is the measured default, 5 is better for trying it out",
+              "coldStartNotes": 5,
 
-              "_fileFloor": "below this similarity a note waits in Inbox",
-              "fileFloor": 0.50,
+              "_fileFloor": "below this similarity a note waits in Inbox. Measured on device: unrelated notes score ~0.840, related ~0.896",
+              "fileFloor": 0.820,
               "_reviewFloor": "above fileFloor but below this: filed, but flagged",
-              "reviewFloor": 0.58,
+              "reviewFloor": 0.865,
               "_minMargin": "the winner must beat the runner-up by this much",
-              "minMargin": 0.04,
+              "minMargin": 0.012,
 
               "_retrievalOnly": "true skips the language model and files on similarity alone",
               "retrievalOnly": false
