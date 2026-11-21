@@ -336,6 +336,7 @@ final class WebHost: ObservableObject {
             let chat = Chat(vault: vault, embedding: embedding, thresholds: { capture.thresholds })
             let reminders = Reminders(vault: vault)
             let images = ImageCapture(vault: vault, capture: capture, embedding: embedding)
+            let gardener = Gardener(vault: vault, embedding: embedding)
             let selfTest = SelfTest(
                 vault: vault, capture: capture, chat: chat,
                 embedding: embedding, intelligence: intelligence, reminders: reminders
@@ -358,7 +359,8 @@ final class WebHost: ObservableObject {
                 reminders: reminders,
                 intelligence: intelligence,
                 selfTest: selfTest,
-                images: images
+                images: images,
+                gardener: gardener
             )
             await server.install(routes)
             await server.start()
@@ -386,6 +388,17 @@ final class WebHost: ObservableObject {
                 // Pending notifications survive a relaunch but not a
                 // reinstall, and a 7-day sideload means reinstalling weekly.
                 await reminders.rescheduleAll()
+
+                // Once there are enough unfiled notes to cluster, derive a
+                // starting taxonomy from them in one pass rather than letting
+                // collections form one at a time from whichever note arrived
+                // first.
+                if vault.inbox.count >= capture.coldStartNotes {
+                    let created = await gardener.bootstrap()
+                    if !created.isEmpty {
+                        Log.vault.notice("cold start created \(created.count, privacy: .public) collections")
+                    }
+                }
             }
 
             let snapshot = await server.snapshot()

@@ -28,6 +28,10 @@ final class RouteTable {
     private let intelligence: Intelligence
     private let selfTest: SelfTest
     private let images: ImageCapture
+    private let gardener: Gardener
+    /// Suggestions the user has waved away. In memory: a dismissal should last
+    /// the session, not forever, because the vault changes underneath it.
+    private let dismissed = DismissedProposals()
 
     init(
         diagnostics: Diagnostics,
@@ -38,7 +42,8 @@ final class RouteTable {
         reminders: Reminders,
         intelligence: Intelligence,
         selfTest: SelfTest,
-        images: ImageCapture
+        images: ImageCapture,
+        gardener: Gardener
     ) {
         self.diagnostics = diagnostics
         self.vault = vault
@@ -49,6 +54,7 @@ final class RouteTable {
         self.intelligence = intelligence
         self.selfTest = selfTest
         self.images = images
+        self.gardener = gardener
     }
 
     func install(on server: HTTPServer) async {
@@ -662,7 +668,38 @@ final class RouteTable {
         await server.appendRoute("GET /api/links") { [vault] _ in
             await Respond.jsonObject(["links": Self.linkTiles(vault)])
         }
-        await server.appendRoute("GET /api/garden") { _ in Respond.json(API.Garden(proposals: [])) }
+        await server.appendRoute("GET /api/garden") { [gardener, dismissed] _ in
+            // Snapshot first: a filter closure is synchronous, so awaiting
+            // the actor inside one does not compile.
+            let hidden = await dismissed.all()
+            let live = await gardener.proposals().filter { !hidden.contains($0.id) }
+            return Respond.jsonObject(["proposals": live.map { proposal in
+                [
+                    "id": proposal.id,
+                    "kind": proposal.kind,
+                    "summary": proposal.summary,
+                    "detail": proposal.detail,
+                    "score": proposal.score
+                ]
+            }])
+        }
+
+        await server.appendRoute("POST /api/garden/apply") { [gardener] request in
+            let body = try await Respond.body(request)
+            let id = body["id"] as? String ?? ""
+            guard let proposal = await gardener.proposals().first(where: { $0.id == id }) else {
+                // The vault moved on since the page drew this card.
+                return Respond.failure("That suggestion is out of date.", status: .notFound)
+            }
+            let ok = await gardener.apply(proposal)
+            return Respond.jsonObject(["ok": ok])
+        }
+
+        await server.appendRoute("POST /api/garden/dismiss") { [dismissed] request in
+            let body = try await Respond.body(request)
+            if let id = body["id"] as? String { await dismissed.insert(id) }
+            return Respond.jsonObject(["ok": true])
+        }
         await server.appendRoute("GET /api/graph") { _ in Respond.json(API.Graph(nodes: [], links: [])) }
         await server.appendRoute("POST /api/undo") { [vault, embedding, reminders] _ in
             Respond.json(await Undo.perform(vault: vault, embedding: embedding, reminders: reminders))
