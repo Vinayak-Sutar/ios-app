@@ -110,22 +110,113 @@ final class Reminders {
     /// guessed.
     func dueNow(at now: Date = Date()) -> [[String: Any]] {
         var out: [[String: Any]] = []
+        let today = Timestamp.localNow(now)
+        guard let nowDate = PlainDate.parse(today) else { return [] }
+
         for entry in vault.notes(status: "open") {
-            guard let remind = entry.note.remind,
-                  let date = Self.date(from: remind),
-                  date <= now else { continue }
-            let key = Self.taskKey(noteID: entry.note.id, when: remind)
-            guard !fired.contains(key) else { continue }
-            out.append([
-                "type": "task",
-                "key": key,
-                "when": remind,
-                "title": entry.note.title.isEmpty ? "Untitled" : entry.note.title,
-                "topic": entry.note.primaryTopic as Any? ?? NSNull(),
-                "noteId": entry.note.id
-            ])
+            // The note's own reminder.
+            if let remind = entry.note.remind,
+               let date = PlainDate.parse(remind), date <= nowDate {
+                let key = Self.taskKey(noteID: entry.note.id, when: remind)
+                if !fired.contains(key), !quiet(entry.note, at: nowDate) {
+                    out.append([
+                        "type": "task",
+                        "key": key,
+                        "when": remind,
+                        "title": entry.note.title.isEmpty ? "Untitled" : entry.note.title,
+                        "topic": entry.note.primaryTopic as Any? ?? NSNull(),
+                        "noteId": entry.note.id
+                    ])
+                }
+            }
+
+            // Reminders on individual checklist items (their ⏰ mark).
+            for item in Checklist.items(in: entry.note.body) where !item.done {
+                guard let remind = item.remind,
+                      let date = PlainDate.parse(remind), date <= nowDate else { continue }
+                let key = "item:\(entry.note.id):\(remind):\(item.text)"
+                guard !fired.contains(key), !quiet(entry.note, at: nowDate) else { continue }
+                out.append([
+                    "type": "item",
+                    "key": key,
+                    "when": remind,
+                    "text": item.text,
+                    "line": item.line,
+                    "listTitle": entry.note.title.isEmpty ? "Untitled" : entry.note.title,
+                    "topic": entry.note.primaryTopic as Any? ?? NSNull(),
+                    "noteId": entry.note.id
+                ])
+            }
+
+            // A list with a deadline speaks up the day before, and once after.
+            guard let progress = Checklist.progress(in: entry.note.body),
+                  let due = entry.note.due,
+                  let dueDate = PlainDate.parse(due),
+                  !quiet(entry.note, at: nowDate) else { continue }
+
+            let daysLeft = nowDate.days(until: dueDate)
+            let finished = progress[0] >= progress[1] && progress[1] > 0
+            if finished { continue }
+
+            if daysLeft == 1 || daysLeft == 0 {
+                let key = "deadline-soon:\(entry.note.id):\(due)"
+                if !fired.contains(key) {
+                    out.append(deadlineCard(entry, progress: progress, due: due, key: key, late: false))
+                }
+            } else if daysLeft < 0 {
+                // Once, and then the daily nagging stops.
+                let key = "deadline-missed:\(entry.note.id):\(due)"
+                if !fired.contains(key) {
+                    out.append(deadlineCard(entry, progress: progress, due: due, key: key, late: true))
+                }
+            }
         }
         return out
+    }
+
+    private func deadlineCard(
+        _ entry: Vault.Entry, progress: [Int], due: String, key: String, late: Bool
+    ) -> [String: Any] {
+        [
+            "type": "deadline",
+            "key": key,
+            "when": due,
+            "due": due,
+            "late": late,
+            "done": progress[0],
+            "total": progress[1],
+            "title": entry.note.title.isEmpty ? "Untitled" : entry.note.title,
+            "topic": entry.note.primaryTopic as Any? ?? NSNull(),
+            "noteId": entry.note.id
+        ]
+    }
+
+    /// "Don't remind me about this until Monday."
+    private func quiet(_ note: Note, at now: PlainDate) -> Bool {
+        guard let until = note.quietUntil, let date = PlainDate.parse(until) else { return false }
+        return now < date
+    }
+
+    /// Move repeating things on rather than finishing them.
+    ///
+    /// Ticking a repeating reminder should set the next occurrence, not mark
+    /// it done — otherwise "water the plants every Monday" survives exactly
+    /// one Monday.
+    @discardableResult
+    func advanceRepeat(_ note: inout Note, at now: Date = Date()) -> Bool {
+        guard let rule = note.repeatRule, Repeats.parse(rule) != nil else { return false }
+        let from = note.remind ?? note.due ?? Timestamp.localNow(now)
+
+        if let remind = note.remind {
+            note.remind = Repeats.nextStamp(after: Timestamp.localNow(now), rule: rule, anchor: remind)
+        }
+        if let due = note.due {
+            note.due = Repeats.nextStamp(after: Timestamp.localNow(now), rule: rule, anchor: due)
+        }
+        if note.remind == nil && note.due == nil {
+            note.due = Repeats.nextStamp(after: Timestamp.localNow(now), rule: rule, anchor: from)
+        }
+        return note.remind != nil || note.due != nil
     }
 
     /// The page posts back the keys it has shown, so nothing fires twice.

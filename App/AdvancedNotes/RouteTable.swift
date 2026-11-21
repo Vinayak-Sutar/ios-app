@@ -182,15 +182,32 @@ final class RouteTable {
                 return Respond.json(API.Failure(error: "not found"), status: .notFound)
             }
             let done = body["done"] as? Bool ?? true
-            entry.note.status = done ? "done" : "open"
+
+            // Ticking a repeating thing moves it on rather than finishing it:
+            // otherwise "water the plants every Monday" survives exactly one
+            // Monday.
+            var next: String?
+            if done, entry.note.repeatRule != nil {
+                var note = entry.note
+                if await reminders.advanceRepeat(&note) {
+                    next = note.remind ?? note.due
+                    entry.note = note
+                }
+            }
+            if next == nil {
+                entry.note.status = done ? "done" : "open"
+            }
             entry.note.updated = Timestamp.utcNow()
             _ = try? await vault.save(
                 entry.note, topic: entry.note.primaryTopic,
                 vector: entry.vector, needsReview: entry.needsReview
             )
-            // A finished note should not go on reminding.
-            if done { await reminders.cancel(noteID: id) }
-            return Respond.jsonObject(["ok": true, "next": NSNull()])
+
+            await reminders.cancel(noteID: id)
+            if entry.note.remind != nil, entry.note.status == "open" {
+                await reminders.schedule(entry.note)
+            }
+            return Respond.jsonObject(["ok": true, "next": next as Any? ?? NSNull()])
         }
     }
 
@@ -644,6 +661,72 @@ final class RouteTable {
 
             let progress = Checklist.progress(in: updated) ?? [0, 0]
             return Respond.jsonObject(["ok": true, "progress": progress])
+        }
+
+        // A list's own settings: deadline, daily check-in, pause, repeat.
+        await server.appendRoute("POST /api/list/settings") { [vault, reminders] request in
+            let body = try await Respond.body(request)
+            let id = body["id"] as? String ?? ""
+            guard var entry = await vault.entry(id) else {
+                return Respond.failure("not found", status: .notFound)
+            }
+
+            // A key that is present but null clears the setting; a key that
+            // is absent leaves it alone. The page relies on that difference.
+            func read(_ name: String) -> String?? {
+                guard body.keys.contains(name) else { return nil }
+                guard let value = body[name] as? String, !value.isEmpty else { return .some(nil) }
+                return .some(value)
+            }
+            if let due = read("due") { entry.note.due = due }
+            if let checkin = read("checkin") { entry.note.checkin = checkin }
+            if let quiet = read("quiet_until") ?? read("quietUntil") { entry.note.quietUntil = quiet }
+            if let rule = read("repeat") { entry.note.repeatRule = rule }
+            if let parent = read("parent") { entry.note.parent = parent }
+            if body["kind"] as? String == "list" { entry.note.kind = "list" }
+
+            entry.note.updated = Timestamp.utcNow()
+            _ = try? await vault.save(
+                entry.note, topic: entry.note.primaryTopic,
+                vector: entry.vector, needsReview: entry.needsReview
+            )
+            await reminders.cancel(noteID: id)
+            if entry.note.remind != nil { await reminders.schedule(entry.note) }
+            return Respond.jsonObject(["ok": true])
+        }
+
+        // A time on one checklist item, written into its own line.
+        await server.appendRoute("POST /api/list/item/when") { [vault] request in
+            let body = try await Respond.body(request)
+            let id = body["id"] as? String ?? ""
+            let text = body["text"] as? String ?? ""
+            guard var entry = await vault.entry(id) else {
+                return Respond.failure("not found", status: .notFound)
+            }
+            var items = Checklist.items(in: entry.note.body)
+            guard let index = items.firstIndex(where: { $0.text == text }) else {
+                return Respond.failure("That item changed. Open the note to see it.", status: .conflict)
+            }
+
+            if body.keys.contains("remind") { items[index].remind = body["remind"] as? String }
+            if body.keys.contains("due") { items[index].due = body["due"] as? String }
+            if body.keys.contains("repeat") { items[index].repeatRule = body["repeat"] as? String }
+
+            var lines = entry.note.body.components(separatedBy: "\n")
+            let line = items[index].line
+            guard line >= 0, line < lines.count else {
+                return Respond.failure("That item moved.", status: .conflict)
+            }
+            let indent = String(lines[line].prefix(while: { $0 == " " || $0 == "	" }))
+            lines[line] = indent + Checklist.render(items[index])
+
+            entry.note.body = lines.joined(separator: "\n")
+            entry.note.updated = Timestamp.utcNow()
+            _ = try? await vault.save(
+                entry.note, topic: entry.note.primaryTopic,
+                vector: entry.vector, needsReview: entry.needsReview
+            )
+            return Respond.jsonObject(["ok": true])
         }
 
         // Adding to a note the user named, rather than making a new one.
