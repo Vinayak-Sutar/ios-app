@@ -141,3 +141,27 @@ final class ReadabilityTests: XCTestCase {
         XCTAssertTrue(Readability.extract("").isEmpty)
     }
 }
+
+extension ReadabilityTests {
+
+    func testTakesThePreviewImage() {
+        let html = """
+            <html><head>
+            <meta property="og:image" content="https://example.test/cover.jpg">
+            <meta property="article:author" content="A Writer">
+            </head><body><p>x</p></body></html>
+            """
+        let article = Readability.extract(html)
+        XCTAssertEqual(article.imageURL, "https://example.test/cover.jpg")
+        XCTAssertEqual(article.author, "A Writer")
+    }
+
+    func testFallsBackToTwitterImage() {
+        let html = "<html><head><meta name=\"twitter:image\" content=\"https://x.test/a.png\"></head></html>"
+        XCTAssertEqual(Readability.extract(html).imageURL, "https://x.test/a.png")
+    }
+
+    func testPagesWithNoPreviewImageSaySo() {
+        XCTAssertEqual(Readability.extract(page).imageURL, "")
+    }
+}

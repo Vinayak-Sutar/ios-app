@@ -338,6 +338,7 @@ final class WebHost: ObservableObject {
             let images = ImageCapture(vault: vault, capture: capture, embedding: embedding)
             let gardener = Gardener(vault: vault, embedding: embedding)
             let calibration = CalibrationRun(embedding: embedding, vault: vault)
+            let previews = LinkPreviews(vault: vault)
             let selfTest = SelfTest(
                 vault: vault, capture: capture, chat: chat,
                 embedding: embedding, intelligence: intelligence, reminders: reminders
@@ -362,7 +363,8 @@ final class WebHost: ObservableObject {
                 selfTest: selfTest,
                 images: images,
                 gardener: gardener,
-                calibration: calibration
+                calibration: calibration,
+                previews: previews
             )
             await server.install(routes)
             await server.start()

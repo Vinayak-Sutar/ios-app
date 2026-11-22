@@ -187,7 +187,6 @@ enum API {
     struct Lists: Encodable { var lists: [String] }
     struct Links: Encodable { var links: [String] }
     struct Garden: Encodable { var proposals: [String] }
-    struct Graph: Encodable { var nodes: [String]; var links: [String] }
     struct Due: Encodable { var reminders: [String]; var rolled: Int }
     struct Ok: Encodable { var ok: Bool = true }
     struct Undone: Encodable { var undone: String? }

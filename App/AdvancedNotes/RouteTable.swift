@@ -30,6 +30,7 @@ final class RouteTable {
     private let images: ImageCapture
     private let gardener: Gardener
     private let calibration: CalibrationRun
+    private let previews: LinkPreviews
     /// Suggestions the user has waved away. In memory: a dismissal should last
     /// the session, not forever, because the vault changes underneath it.
     private let dismissed = DismissedProposals()
@@ -45,7 +46,8 @@ final class RouteTable {
         selfTest: SelfTest,
         images: ImageCapture,
         gardener: Gardener,
-        calibration: CalibrationRun
+        calibration: CalibrationRun,
+        previews: LinkPreviews
     ) {
         self.diagnostics = diagnostics
         self.vault = vault
@@ -58,6 +60,7 @@ final class RouteTable {
         self.images = images
         self.gardener = gardener
         self.calibration = calibration
+        self.previews = previews
     }
 
     func install(on server: HTTPServer) async {
@@ -526,20 +529,20 @@ final class RouteTable {
         return out
     }
 
-    /// Every link written in any note, one tile each, listing the notes it
-    /// appears in.
+    /// Every link written in any note, once each, with the notes it appears
+    /// in.
     ///
     /// Worked out from the notes on every request rather than kept in a
     /// table: there is nothing to keep in step, and nothing a rebuild can
-    /// lose. The same article shared two ways collapses to one tile because
+    /// lose. The same article shared two ways collapses to one entry because
     /// the key has its tracking parameters stripped.
     @MainActor
-    private static func linkTiles(_ vault: Vault) -> [[String: Any]] {
-        var tiles: [String: [String: Any]] = [:]
+    private static func linkIndex(_ vault: Vault) -> [(key: String, url: URL, notes: [Vault.Entry])] {
+        var found: [String: (url: URL, notes: [Vault.Entry])] = [:]
         var order: [String] = []
 
         for entry in vault.notes() {
-            // Only the user's own text, never a fetched page's body — that
+            // Only the user's own text, never a fetched page's body - that
             // would turn every outbound link on an article into a tile.
             let ownText = entry.note.source.map { source in
                 entry.note.body.components(separatedBy: "\n\n").first ?? source
@@ -552,25 +555,157 @@ final class RouteTable {
 
             for url in urls {
                 let key = LinkText.canonical(url)
-                if tiles[key] == nil {
+                if found[key] == nil {
                     order.append(key)
-                    tiles[key] = [
-                        "key": key,
-                        "url": url.absoluteString,
-                        "site": url.host ?? "link",
-                        "title": entry.note.title.isEmpty ? (url.host ?? url.absoluteString) : entry.note.title,
-                        "notes": [[String: Any]]()
-                    ]
+                    found[key] = (url, [])
                 }
-                var notes = tiles[key]?["notes"] as? [[String: Any]] ?? []
-                notes.append([
-                    "id": entry.note.id,
-                    "title": entry.note.title.isEmpty ? "Untitled" : entry.note.title
-                ])
-                tiles[key]?["notes"] = notes
+                found[key]?.notes.append(entry)
             }
         }
-        return order.compactMap { tiles[$0] }
+        return order.compactMap { key in
+            found[key].map { (key: key, url: $0.url, notes: $0.notes) }
+        }
+    }
+
+    /// One tile per link, in the user's own arrangement.
+    @MainActor
+    private static func linkTiles(_ vault: Vault, _ previews: LinkPreviews) -> [[String: Any]] {
+        var tiles: [String: [String: Any]] = [:]
+        var keys: [String] = []
+
+        for link in linkIndex(vault) {
+            let host = link.url.host ?? "link"
+            let firstSaved = link.notes.map { $0.note.created }.min()
+            keys.append(link.key)
+
+            var tile: [String: Any] = [
+                "key": link.key,
+                "url": link.url.absoluteString,
+                "site": host,
+                "kind": LinkKind.of(host: host, path: link.url.path),
+                "title": (link.notes.first?.note.title ?? "").ifEmpty(host),
+                "caption": "",
+                "handle": "",
+                "thumb": NSNull(),
+                "saved": firstSaved as Any? ?? NSNull(),
+                // Hosts that might need the user's account are never
+                // contacted, and the tile says so plainly rather than looking
+                // like a fetch that failed.
+                "private": !LinkFetcher.shouldFetch(link.url),
+                "notes": link.notes.map { entry -> [String: Any] in
+                    let isSource = entry.note.source
+                        .flatMap { URL(string: $0) }
+                        .map { LinkText.canonical($0) == link.key } ?? false
+                    return [
+                        "id": entry.note.id,
+                        "title": entry.note.title.ifEmpty("Untitled"),
+                        "topic": entry.note.primaryTopic as Any? ?? NSNull(),
+                        "how": isSource ? "saved" : "mentioned"
+                    ]
+                }
+            ]
+
+            if let preview = previews.preview(for: link.key) {
+                for (field, value) in preview.fields where field != "key" {
+                    // A site that gave no title leaves the note's own in
+                    // place: a tile labelled with the bare host is worse than
+                    // one labelled with what the user wrote.
+                    if field == "title", (value as? String)?.isEmpty != false { continue }
+                    tile[field] = value
+                }
+            }
+            tiles[link.key] = tile
+        }
+
+        return previews.sort(keys).compactMap { tiles[$0] }
+    }
+
+    /// The collections and notes, as the Map screen draws them.
+    ///
+    /// Topics first, because the page keeps only the first 600 nodes and then
+    /// drops any link whose ends are missing: with notes first, a large vault
+    /// would render as a field of unconnected dots.
+    @MainActor
+    /// Not private: the on-device self-test checks the invariant the
+    /// page depends on, that every link joins two nodes it was sent.
+    static func graph(_ vault: Vault, _ capture: Capture) -> [String: Any] {
+        let thresholds = capture.thresholds
+        var nodes: [[String: Any]] = []
+        var links: [[String: Any]] = []
+
+        let paths = vault.collectionPaths
+        let known = Set(paths)
+        for path in paths {
+            nodes.append([
+                "id": "t:" + path,
+                "type": "topic",
+                "label": path.components(separatedBy: "/").last ?? path,
+                "path": path,
+                "size": vault.notes(topic: path).count,
+                "state": "active"
+            ])
+            // A nested collection hangs off its parent, but only when the
+            // parent is itself a collection: a path can outlive the
+            // collection above it.
+            if let cut = path.lastIndex(of: "/") {
+                let parent = String(path[path.startIndex..<cut])
+                if known.contains(parent) {
+                    links.append(["source": "t:" + parent, "target": "t:" + path, "type": "parent"])
+                }
+            }
+        }
+
+        let room = Swift.max(0, 600 - nodes.count)
+        let entries = Array(vault.notes().prefix(room))
+        for entry in entries {
+            nodes.append([
+                "id": entry.note.id,
+                "type": "note",
+                "label": entry.note.title.ifEmpty("Untitled"),
+                "topic": entry.note.primaryTopic as Any? ?? NSNull()
+            ])
+            if let topic = entry.note.primaryTopic, known.contains(topic) {
+                links.append(["source": entry.note.id, "target": "t:" + topic, "type": "about"])
+            }
+        }
+
+        // Two notes are joined when they are as close as the router would
+        // need to be to suggest one for the other - the same bar, so a dotted
+        // line on the map means the same thing as a suggestion elsewhere.
+        // Capped at two per note: past that the layout is a ball of wool.
+        for (index, entry) in entries.enumerated() where !entry.vector.isEmpty {
+            var near: [(id: String, score: Double)] = []
+            for other in entries[(index + 1)...] where !other.vector.isEmpty {
+                let score = Vectors.cosine(entry.vector, other.vector)
+                if score >= thresholds.reviewFloor { near.append((other.note.id, score)) }
+            }
+            for found in near.sorted(by: { $0.score > $1.score }).prefix(2) {
+                links.append(["source": entry.note.id, "target": found.id, "type": "related"])
+            }
+        }
+
+        return ["nodes": nodes, "links": links]
+    }
+
+    /// One stored link thumbnail.
+    @MainActor
+    private static func thumb(_ previews: LinkPreviews, path: String) -> HTTPResponse {
+        let requested = path.removingPercentEncoding ?? path
+        guard let name = requested.components(separatedBy: "/").last, !name.isEmpty,
+              let (data, type) = previews.thumbData(named: name) else {
+            return Respond.failure("not found", status: .notFound)
+        }
+        return HTTPResponse(
+            statusCode: .ok,
+            headers: [
+                .contentType: type,
+                // Named after the hash of its own bytes, so it can be cached
+                // hard: a different image is a different name.
+                HTTPHeader("Cache-Control"): "private, max-age=31536000",
+                HTTPHeader("X-Content-Type-Options"): "nosniff"
+            ],
+            body: data
+        )
     }
 
     nonisolated private static func captureResult(_ outcome: Capture.Outcome) -> API.CaptureResult {
@@ -671,8 +806,40 @@ final class RouteTable {
             await Respond.jsonObject(["lists": Self.allLists(vault)])
         }
 
-        await server.appendRoute("GET /api/links") { [vault] _ in
-            await Respond.jsonObject(["links": Self.linkTiles(vault)])
+        await server.appendRoute("GET /api/links") { [vault, previews] _ in
+            await Respond.jsonObject(["links": Self.linkTiles(vault, previews)])
+        }
+
+        // Previews arrive a few at a time while the Links page is open,
+        // because the page asks again as long as any are left. A whole
+        // vault's worth in one request would be a burst of traffic to a
+        // dozen sites and a view that sits empty until the slowest answers.
+        await server.appendRoute("POST /api/links/fetch") { [vault, previews] request in
+            let body = try await Respond.body(request)
+            let asked = body["max"] as? Int ?? 3
+            let wanted = Swift.min(Swift.max(1, asked), 8)
+
+            let pending = await Self.linkIndex(vault)
+                .filter { LinkFetcher.shouldFetch($0.url) }
+                .map { (key: $0.key, url: $0.url) }
+            let result = await previews.fetchMissing(urls: pending, max: wanted)
+
+            return Respond.jsonObject([
+                "done": result.done.map { $0.fields },
+                "left": result.left
+            ])
+        }
+
+        // The user's own arrangement of the tiles.
+        await server.appendRoute("POST /api/links/layout") { [previews] request in
+            let body = try await Respond.body(request)
+            let order = body["order"] as? [String] ?? []
+            await previews.setOrder(order)
+            return Respond.jsonObject(["ok": true])
+        }
+
+        await server.appendRoute("GET /link-thumb/*") { [previews] request in
+            await Self.thumb(previews, path: request.path)
         }
         await server.appendRoute("GET /api/garden") { [gardener, dismissed] _ in
             // Snapshot first: a filter closure is synchronous, so awaiting
@@ -706,7 +873,9 @@ final class RouteTable {
             if let id = body["id"] as? String { await dismissed.insert(id) }
             return Respond.jsonObject(["ok": true])
         }
-        await server.appendRoute("GET /api/graph") { _ in Respond.json(API.Graph(nodes: [], links: [])) }
+        await server.appendRoute("GET /api/graph") { [vault, capture] _ in
+            await Respond.jsonObject(Self.graph(vault, capture))
+        }
         await server.appendRoute("POST /api/undo") { [vault, embedding, reminders] _ in
             Respond.json(await Undo.perform(vault: vault, embedding: embedding, reminders: reminders))
         }

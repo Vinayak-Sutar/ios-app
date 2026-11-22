@@ -89,6 +89,7 @@ final class SelfTest {
         await step("chat answers from a note") { try await self.checkChat() }
         await step("chat streams readable text") { try await self.checkChatStream() }
         await step("reminders schedule with the OS") { try await self.checkReminder() }
+        await step("the map joins notes to collections") { try self.checkGraph() }
         await step("test notes are cleaned up") { try await self.cleanUp() }
 
         let passed = checks.filter { $0.status == "pass" }.count
@@ -468,6 +469,44 @@ final class SelfTest {
             "the OS did not register the notification"
         )
         await reminders.cancel(noteID: note.id)
+    }
+
+    /// The Map screen keeps the first 600 nodes and then silently drops any
+    /// link whose two ends are not among them. A graph with dangling ids
+    /// therefore does not look broken — it looks like a vault with no
+    /// connections, which is the kind of wrong that goes unnoticed.
+    private func checkGraph() throws {
+        let graph = RouteTable.graph(vault, capture)
+        let nodes = graph["nodes"] as? [[String: Any]] ?? []
+        let links = graph["links"] as? [[String: Any]] ?? []
+
+        let ids = Set(nodes.compactMap { $0["id"] as? String })
+        try expect(ids.count == nodes.count, "two nodes share an id")
+        try expect(!nodes.isEmpty, "no nodes at all")
+
+        for node in nodes where (node["type"] as? String) == "topic" {
+            let id = node["id"] as? String ?? ""
+            try expect(id.hasPrefix("t:"), "topic node \(id) is not prefixed t:")
+            try expect(!((node["path"] as? String) ?? "").isEmpty, "topic \(id) has no path")
+        }
+
+        for link in links {
+            let source = link["source"] as? String ?? ""
+            let target = link["target"] as? String ?? ""
+            try expect(ids.contains(source), "link from missing node \(source)")
+            try expect(ids.contains(target), "link to missing node \(target)")
+        }
+
+        // One of the notes written earlier in this run is filed, so at least
+        // one "about" link should exist: a graph of unconnected dots is the
+        // failure this check is for.
+        let filed = vault.notes().contains { $0.note.primaryTopic != nil }
+        if filed {
+            try expect(
+                links.contains { ($0["type"] as? String) == "about" },
+                "notes are filed but nothing joins them to a collection"
+            )
+        }
     }
 
     private func cleanUp() async throws {

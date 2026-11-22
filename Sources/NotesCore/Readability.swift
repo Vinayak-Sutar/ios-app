@@ -15,12 +15,21 @@ public struct Article: Sendable, Equatable {
     public var description: String
     public var text: String
     public var siteName: String
+    /// The page's own preview image, for a link tile.
+    public var imageURL: String
+    /// Who made it, where the page says so.
+    public var author: String
 
-    public init(title: String = "", description: String = "", text: String = "", siteName: String = "") {
+    public init(
+        title: String = "", description: String = "", text: String = "",
+        siteName: String = "", imageURL: String = "", author: String = ""
+    ) {
         self.title = title
         self.description = description
         self.text = text
         self.siteName = siteName
+        self.imageURL = imageURL
+        self.author = author
     }
 
     public var isEmpty: Bool {
@@ -59,6 +68,10 @@ public enum Readability {
         let ogTitle = decode(meta(html, property: "og:title"))
         if article.title.isEmpty { article.title = ogTitle }
 
+        article.imageURL = decode(meta(html, property: "og:image"))
+            .ifEmpty(decode(meta(html, name: "twitter:image")))
+        article.author = decode(meta(html, property: "article:author"))
+            .ifEmpty(decode(meta(html, name: "author")))
         article.text = bodyText(html)
         return article
     }
