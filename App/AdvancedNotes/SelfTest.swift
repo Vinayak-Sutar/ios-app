@@ -87,6 +87,7 @@ final class SelfTest {
         await step("search finds a captured note") { try await self.checkSearch() }
         await step("filing picks the right collection") { try await self.checkFiling() }
         await step("chat answers from a note") { try await self.checkChat() }
+        await step("chat streams readable text") { try await self.checkChatStream() }
         await step("reminders schedule with the OS") { try await self.checkReminder() }
         await step("test notes are cleaned up") { try await self.cleanUp() }
 
@@ -397,6 +398,55 @@ final class SelfTest {
             "the stream never produced an answer: \(text.prefix(200))"
         )
         try expect(!text.contains("\"type\":\"error\""), "chat returned an error: \(text.prefix(200))")
+    }
+
+    /// The streamed path, checked separately from the collected one.
+    ///
+    /// Specifically guarding a thing the compiler cannot: the model's stream
+    /// yields snapshots whose exact type I could not confirm without a Mac, so
+    /// the code reads them via `String(describing:)`. That compiles whatever
+    /// the type turns out to be — which means a green build proves nothing
+    /// here. If the element is a wrapper rather than the text, every "token"
+    /// would arrive as a struct dump, and only running it can tell.
+    private func checkChatStream() async throws {
+        guard Intelligence.availability.isAvailable else { throw Skip(why: "model unavailable") }
+
+        var events: [String] = []
+        var text = ""
+        for await chunk in chat.stream(to: Chat.Request(message: "what did I write about levain?", history: [])) {
+            guard let line = String(data: chunk, encoding: .utf8) else { continue }
+            for part in line.split(separator: "\n") {
+                events.append(String(part))
+                if let data = part.data(using: .utf8),
+                   let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                   object["type"] as? String == "token",
+                   let fragment = object["text"] as? String {
+                    text += fragment
+                }
+            }
+        }
+
+        try expect(!events.isEmpty, "the stream produced nothing")
+        try expect(
+            events.contains { $0.contains("\"type\":\"sources\"") },
+            "no sources event"
+        )
+
+        // The tell for a wrong snapshot type: Swift's reflection of a struct
+        // always looks like this, and prose never does.
+        for marker in ["Response<", "(content:", "PartiallyGenerated", "GeneratedContent("] {
+            try expect(
+                !text.contains(marker),
+                "tokens look like a struct dump, not prose — snapshot type is wrong: \(text.prefix(120))"
+            )
+        }
+
+        checks.append(Check(
+            name: "   stream detail",
+            status: "pass",
+            detail: "\(events.count) events, \(text.count) characters of answer",
+            ms: 0
+        ))
     }
 
     private func checkReminder() async throws {
