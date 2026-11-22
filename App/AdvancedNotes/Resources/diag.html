@@ -76,6 +76,7 @@
 <div class="actions">
   <button class="primary" id="tests">Run tests</button>
   <button id="run">Run probes</button>
+  <button id="calibrate">Calibrate</button>
   <button id="refresh">Refresh</button>
   <button id="logs">Logs</button>
   <button id="raw">Raw JSON</button>
@@ -223,6 +224,39 @@ document.getElementById('tests').onclick = async (ev) => {
   }
   ev.target.disabled = false;
   ev.target.textContent = 'Run tests';
+};
+
+document.getElementById('calibrate').onclick = async (ev) => {
+  ev.target.disabled = true;
+  ev.target.textContent = 'Measuring…';
+  out.innerHTML = '<div class="card">Embedding a corpus on this device. This takes a minute…</div>';
+  try {
+    const res = await fetch('/api/calibrate', { method: 'POST' });
+    const r = await res.json();
+    const rows = [];
+    const m = r.measurement, c = r.centredMeasurement;
+    if (m) {
+      rows.push(row('raw same topic', num(m.withinMean, 4)));
+      rows.push(row('raw different', num(m.acrossMean, 4)));
+      rows.push(row('raw gap', pill(m.gap >= 0.08, num(m.gap, 4), m.gap >= 0.02 && m.gap < 0.08)));
+    }
+    if (c) {
+      rows.push(row('centred same topic', num(c.withinMean, 4)));
+      rows.push(row('centred different', num(c.acrossMean, 4)));
+      rows.push(row('centred gap', pill(c.gap >= 0.08, num(c.gap, 4), c.gap >= 0.02 && c.gap < 0.08)));
+    }
+    if (r.score) rows.push(row('filing (raw)', esc(Math.round(r.score.purity*100) + '% pure, ' + Math.round(r.score.coverage*100) + '% filed')));
+    if (r.centredScore) rows.push(row('filing (centred)', esc(Math.round(r.centredScore.purity*100) + '% pure, ' + Math.round(r.centredScore.coverage*100) + '% filed')));
+    rows.push(row('notes', esc(r.noteCount)));
+    rows.push(row('took', esc(r.elapsedMS) + ' ms'));
+    if (r.exportedTo) rows.push(row('exported', '<span class="v mono">' + esc(r.exportedTo) + '</span>'));
+    out.innerHTML = card('Calibration', rows, '<p class="verdict">' + esc(r.recommendation) + '</p>');
+    blob.textContent = JSON.stringify(r, null, 2);
+  } catch (err) {
+    out.innerHTML = '<div class="card"><h2>Calibration failed</h2><pre>' + esc(err && err.message) + '</pre></div>';
+  }
+  ev.target.disabled = false;
+  ev.target.textContent = 'Calibrate';
 };
 
 document.getElementById('refresh').onclick = () => load('/api/diag');

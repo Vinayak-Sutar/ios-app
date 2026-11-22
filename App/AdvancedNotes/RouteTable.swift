@@ -29,6 +29,7 @@ final class RouteTable {
     private let selfTest: SelfTest
     private let images: ImageCapture
     private let gardener: Gardener
+    private let calibration: CalibrationRun
     /// Suggestions the user has waved away. In memory: a dismissal should last
     /// the session, not forever, because the vault changes underneath it.
     private let dismissed = DismissedProposals()
@@ -43,7 +44,8 @@ final class RouteTable {
         intelligence: Intelligence,
         selfTest: SelfTest,
         images: ImageCapture,
-        gardener: Gardener
+        gardener: Gardener,
+        calibration: CalibrationRun
     ) {
         self.diagnostics = diagnostics
         self.vault = vault
@@ -55,6 +57,7 @@ final class RouteTable {
         self.selfTest = selfTest
         self.images = images
         self.gardener = gardener
+        self.calibration = calibration
     }
 
     func install(on server: HTTPServer) async {
@@ -913,6 +916,13 @@ final class RouteTable {
         await server.appendRoute("POST /api/diag/probe") { [diagnostics] _ in
             Respond.json(await diagnostics.runProbes())
         }
+        // Measures both distributions on this device, derives thresholds
+        // from them, and exports the matrix so every later sweep can run on
+        // a laptop instead.
+        await server.appendRoute("POST /api/calibrate") { [calibration] _ in
+            Respond.json(await calibration.run())
+        }
+
         await server.appendRoute("GET /api/diag/log") { _ in
             Respond.text(Log.recentEntries().joined(separator: "\n"))
         }
