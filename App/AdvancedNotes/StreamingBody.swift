@@ -37,7 +37,9 @@ struct StreamingBody: AsyncBufferedSequence, Sendable {
         mutating func nextBuffer(suggested count: Int) async throws -> ArraySlice<UInt8>? {
             if pending.isEmpty { await fill() }
             guard !pending.isEmpty else { return nil }
-            let take = min(max(1, count), pending.count)
+            // Swift-qualified: inside this iterator, bare `min`/`max` resolve
+            // to instance methods rather than the global functions.
+            let take = Swift.min(Swift.max(1, count), pending.count)
             let out = pending.prefix(take)
             pending.removeFirst(take)
             return out
