@@ -190,8 +190,7 @@ final class RouteTable {
                 vector: entry.vector, needsReview: entry.needsReview
             )
 
-            await reminders.cancel(noteID: id)
-            if entry.note.remind != nil { await reminders.schedule(entry.note) }
+            await reminders.sync(entry.note)
             return Respond.json(API.Ok())
         }
 
@@ -223,10 +222,7 @@ final class RouteTable {
                 vector: entry.vector, needsReview: entry.needsReview
             )
 
-            await reminders.cancel(noteID: id)
-            if entry.note.remind != nil, entry.note.status == "open" {
-                await reminders.schedule(entry.note)
-            }
+            await reminders.sync(entry.note)
             return Respond.jsonObject(["ok": true, "next": next as Any? ?? NSNull()])
         }
     }
@@ -345,17 +341,21 @@ final class RouteTable {
     // MARK: - Mutations
 
     private func installCapture(on server: HTTPServer) async {
-        await server.appendRoute("POST /api/capture") { [capture] request in
+        await server.appendRoute("POST /api/capture") { [capture, reminders] request in
             let body = try await Respond.body(request)
             let text = (body["text"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             guard !text.isEmpty else {
                 return Respond.json(API.Failure(error: "empty"), status: .badRequest)
             }
             let outcome = await capture.capture(text: text)
+            // The model may have read a time out of the note. Without this the
+            // alarm existed only in the frontmatter until the next cold launch,
+            // which is to say it did not exist.
+            await reminders.sync(outcome.note)
             return Respond.json(Self.captureResult(outcome))
         }
 
-        await server.appendRoute("POST /api/note/update") { [vault] request in
+        await server.appendRoute("POST /api/note/update") { [vault, reminders] request in
             let body = try await Respond.body(request)
             let id = body["id"] as? String ?? ""
             guard var entry = await vault.entry(id) else {
@@ -370,6 +370,9 @@ final class RouteTable {
             let path = (try? await vault.save(
                 entry.note, topic: entry.note.primaryTopic, vector: vector, needsReview: false
             )) ?? entry.path
+            // The body is where checklist times live, so an edit can add or
+            // remove an alarm without touching any other field.
+            await reminders.sync(entry.note)
             return await Respond.json(API.NoteDetail(
                 entry.note, path: path, needsReview: false, related: []
             ))
@@ -405,31 +408,40 @@ final class RouteTable {
             return Respond.json(["path": path])
         }
 
-        // "File it for me" on an unfiled note.
-        await server.appendRoute("POST /api/note/file") { [vault, capture] request in
+        // "File it for me" on an unfiled note. The note is moved, not
+        // replaced: same id, same title, same dates, same picture.
+        await server.appendRoute("POST /api/note/file") { [vault, capture, reminders] request in
             let body = try await Respond.body(request)
             let id = body["id"] as? String ?? ""
             guard let entry = await vault.entry(id) else {
                 return Respond.json(API.Failure(error: "not found"), status: .notFound)
             }
-            let outcome = await capture.capture(text: entry.note.body)
-            try? await vault.delete(id)
+            let outcome = await capture.refile(entry)
+            await reminders.sync(outcome.note)
             return Respond.json(Self.captureResult(outcome))
         }
 
-        await server.appendRoute("POST /api/note/delete") { [vault] request in
+        await server.appendRoute("POST /api/note/delete") { [vault, reminders] request in
             let body = try await Respond.body(request)
-            try? await vault.delete(body["id"] as? String ?? "")
+            let id = body["id"] as? String ?? ""
+            // Before the note goes, not after: cancelling works off the
+            // pending requests, and an alarm left behind fires days later for
+            // a note that no longer exists.
+            await reminders.cancel(noteID: id)
+            try? await vault.delete(id)
             return Respond.json(API.Ok())
         }
 
         // A note opened and closed without typing anything leaves no trace.
-        await server.appendRoute("POST /api/note/discard") { [vault] request in
+        await server.appendRoute("POST /api/note/discard") { [vault, reminders] request in
             let body = try await Respond.body(request)
             let id = body["id"] as? String ?? ""
             guard let entry = await vault.entry(id) else { return Respond.json(["discarded": false]) }
             let blank = entry.note.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            if blank { try? await vault.delete(id) }
+            if blank {
+                await reminders.cancel(noteID: id)
+                try? await vault.delete(id)
+            }
             return Respond.json(["discarded": blank])
         }
     }
@@ -726,6 +738,8 @@ final class RouteTable {
             topic: outcome.decision.topicPath,
             path: outcome.path,
             outcome: outcome.decision.outcome.rawValue,
+            filed: outcome.decision.topicPath != nil,
+            reason: outcome.decision.reason,
             related: outcome.relatedCount,
             steered: false,
             bootstrapped: 0,
@@ -892,7 +906,7 @@ final class RouteTable {
         // text; the text is what actually identifies the item, because the
         // page may be a moment out of date and toggling the wrong line
         // silently is the failure worth avoiding.
-        await server.appendRoute("POST /api/list/item") { [vault] request in
+        await server.appendRoute("POST /api/list/item") { [vault, reminders] request in
             let body = try await Respond.body(request)
             let id = body["id"] as? String ?? ""
             let line = body["line"] as? Int ?? -1
@@ -917,6 +931,7 @@ final class RouteTable {
                 vector: entry.vector, needsReview: entry.needsReview
             )
 
+            await reminders.sync(entry.note)
             let progress = Checklist.progress(in: updated) ?? [0, 0]
             return Respond.jsonObject(["ok": true, "progress": progress])
         }
@@ -948,13 +963,12 @@ final class RouteTable {
                 entry.note, topic: entry.note.primaryTopic,
                 vector: entry.vector, needsReview: entry.needsReview
             )
-            await reminders.cancel(noteID: id)
-            if entry.note.remind != nil { await reminders.schedule(entry.note) }
+            await reminders.sync(entry.note)
             return Respond.jsonObject(["ok": true])
         }
 
         // A time on one checklist item, written into its own line.
-        await server.appendRoute("POST /api/list/item/when") { [vault] request in
+        await server.appendRoute("POST /api/list/item/when") { [vault, reminders] request in
             let body = try await Respond.body(request)
             let id = body["id"] as? String ?? ""
             let text = body["text"] as? String ?? ""
@@ -984,6 +998,7 @@ final class RouteTable {
                 entry.note, topic: entry.note.primaryTopic,
                 vector: entry.vector, needsReview: entry.needsReview
             )
+            await reminders.sync(entry.note)
             return Respond.jsonObject(["ok": true])
         }
 
@@ -1016,7 +1031,7 @@ final class RouteTable {
         }
 
         // Adding to a note the user named, rather than making a new one.
-        await server.appendRoute("POST /api/note/append") { [vault, embedding] request in
+        await server.appendRoute("POST /api/note/append") { [vault, embedding, reminders] request in
             let body = try await Respond.body(request)
             let id = body["id"] as? String ?? ""
             let text = (body["text"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1030,6 +1045,7 @@ final class RouteTable {
                 entry.note, topic: entry.note.primaryTopic,
                 vector: vector, needsReview: entry.needsReview, recordUndo: true
             )) ?? entry.path
+            await reminders.sync(entry.note)
             return await Respond.json(API.NoteDetail(
                 entry.note, path: path, needsReview: entry.needsReview, related: []
             ))
@@ -1043,15 +1059,19 @@ final class RouteTable {
             guard var entry = await vault.entry(id) else {
                 return Respond.failure("not found", status: .notFound)
             }
+            // The neighbours' effective positions, not their stored ones:
+            // a note that has never been dragged has no stored position, and
+            // treating that as "no neighbour" put the dropped note at the end
+            // of the list instead of where it was let go.
             var before: Double?
             var after: Double?
-            if let neighbour = body["before"] as? String {
-                before = await vault.entry(neighbour)?.note.order
+            if let neighbour = body["before"] as? String, let row = await vault.entry(neighbour) {
+                before = NoteOrder.position(row.note)
             }
-            if let neighbour = body["after"] as? String {
-                after = await vault.entry(neighbour)?.note.order
+            if let neighbour = body["after"] as? String, let row = await vault.entry(neighbour) {
+                after = NoteOrder.position(row.note)
             }
-            let position = Self.midpoint(before: before, after: after)
+            let position = NoteOrder.between(before: before, after: after)
 
             entry.note.order = position
             entry.note.updated = Timestamp.utcNow()
@@ -1060,16 +1080,6 @@ final class RouteTable {
                 vector: entry.vector, needsReview: entry.needsReview
             )
             return Respond.jsonObject(["ok": true, "pos": position])
-        }
-    }
-
-    /// A position between two neighbours, or just outside the end ones.
-    nonisolated static func midpoint(before: Double?, after: Double?) -> Double {
-        switch (before, after) {
-        case let (.some(a), .some(b)): return (a + b) / 2
-        case let (.some(a), .none): return a - 1
-        case let (.none, .some(b)): return b + 1
-        case (.none, .none): return 0
         }
     }
 

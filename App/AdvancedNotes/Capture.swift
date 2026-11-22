@@ -106,6 +106,7 @@ final class Capture {
         let coldStart = max(0, coldStartNotes - vault.entries.count)
 
         var decision: Decision
+        var extras = Extras()
         if coldStart > 0 {
             decision = Decision.inbox(
                 reason: "still learning your collections (\(coldStart) more notes)",
@@ -120,15 +121,17 @@ final class Capture {
             // risk of being overruled wrongly.
             decision = Router.decideFromRetrieval(candidates, thresholds)
         } else {
-            decision = await decideWithModel(text: text, candidates: candidates)
+            let read = await decideWithModel(text: text, candidates: candidates)
+            decision = read.decision
+            extras = read.extras
         }
 
         // 5. Apply.
         note.topics = decision.topicPath.map { [$0] } ?? []
         note.updated = Timestamp.utcNow()
-        if let better = pendingTitle { note.title = better; pendingTitle = nil }
-        if let kind = pendingKind { note.kind = kind; pendingKind = nil }
-        if let due = pendingDue { note.due = due; note.remind = due; pendingDue = nil }
+        if let better = extras.title { note.title = better }
+        if let kind = extras.kind { note.kind = kind }
+        if let due = extras.due { note.due = due; note.remind = due }
 
         path = (try? vault.save(
             note,
@@ -145,23 +148,94 @@ final class Capture {
         return Outcome(note: note, path: path, decision: decision, relatedCount: related)
     }
 
-    // The model's extra findings, applied after the routing decision so a
-    // refusal cannot cost the title as well as the filing.
-    private var pendingTitle: String?
-    private var pendingKind: String?
-    private var pendingDue: String?
+    /// Work out where a note that is already saved belongs, and move it.
+    ///
+    /// "File it for me" on an Inbox row. The note keeps its id and everything
+    /// on it; only the collection changes. The first version re-ran capture on
+    /// the body text and deleted the original, which swapped the note for a
+    /// copy: new id, no due date, no media, no original date, and a toast
+    /// whose Move button pointed at a note that no longer existed.
+    ///
+    /// No cold-start hold here, unlike capture. The user asked, and answering
+    /// "still learning your collections" to a direct request is not an answer.
+    func refile(_ entry: Vault.Entry) async -> Outcome {
+        var note = entry.note
+        var vector = entry.vector
+        if vector.isEmpty { vector = await embedding.embed(note.embeddingText) }
 
-    private func decideWithModel(text: String, candidates: [Candidate]) async -> Decision {
+        guard !vector.isEmpty else {
+            return Outcome(
+                note: note, path: entry.path,
+                decision: .inbox(reason: "the embedder is not ready yet", usedModel: false),
+                relatedCount: 0
+            )
+        }
+
+        let candidates = vault.candidates(for: vector, limit: thresholds.topicCandidates)
+        var decision: Decision
+        if retrievalOnly || Router.retrievalIsConfident(candidates, thresholds) {
+            decision = Router.decideFromRetrieval(candidates, thresholds)
+        } else {
+            // Whatever else the model noticed is dropped on purpose: the user
+            // asked where this goes, not for it to be retitled.
+            decision = await decideWithModel(text: note.embeddingText, candidates: candidates).decision
+        }
+
+        // "I don't know" leaves the note exactly where it is. This route can
+        // be called on any note, and the request was to file it - never to
+        // take one out of the collection it is already in.
+        guard let topic = decision.topicPath else {
+            return Outcome(note: note, path: entry.path, decision: decision, relatedCount: 0)
+        }
+
+        note.topics = [topic]
+        note.updated = Timestamp.utcNow()
+        let path = (try? vault.save(
+            note,
+            topic: topic,
+            vector: vector,
+            needsReview: decision.outcome == .review,
+            recordUndo: true
+        )) ?? entry.path
+
+        Log.routes.notice(
+            "refiled \(note.id, privacy: .public) -> \(decision.outcome.rawValue, privacy: .public): \(decision.reason, privacy: .public)"
+        )
+        let related = vault.candidates(for: vector, limit: 6).filter { $0.similarity > 0.5 }.count
+        return Outcome(note: note, path: path, decision: decision, relatedCount: related)
+    }
+
+    /// What the model noticed besides the filing: a better title, what kind of
+    /// thing it is, a time it implies.
+    ///
+    /// Returned rather than stashed on the instance, which is how it was
+    /// first written. Those properties were read after an await, so two
+    /// captures overlapping - a typed note while a pasted image is still
+    /// being filed - could hand one note's title to the other.
+    struct Extras {
+        var title: String?
+        var kind: String?
+        var due: String?
+    }
+
+    private func decideWithModel(
+        text: String, candidates: [Candidate]
+    ) async -> (decision: Decision, extras: Extras) {
         guard Intelligence.availability.isAvailable else {
-            return Router.decideFromRetrieval(candidates, thresholds)
-                .withReason("the on-device model is unavailable; used retrieval")
+            return (
+                Router.decideFromRetrieval(candidates, thresholds)
+                    .withReason("the on-device model is unavailable; used retrieval"),
+                Extras()
+            )
         }
 
         do {
             let reading = try await intelligence.read(text: text, candidates: candidates)
-            pendingTitle = Self.cleanTitle(reading.title)
-            pendingKind = reading.kind.rawName
-            pendingDue = Self.parseDue(reading.due)
+            let extras = Extras(
+                title: Self.cleanTitle(reading.title),
+                kind: reading.kind.rawName,
+                due: Self.parseDue(reading.due)
+            )
 
             let choice: ModelChoice
             if let slot = reading.collection.slot {
@@ -176,21 +250,27 @@ final class Capture {
             // than the two checks Router does: alias, exact name, normalised
             // key, near key, containment, content similarity, then the cap.
             if case let .newCollection(proposed) = choice {
-                return await gated(proposed, candidates: candidates)
+                return (await gated(proposed, candidates: candidates), extras)
             }
-            return Router.apply(
-                choice: choice,
-                candidates: candidates,
-                thresholds: thresholds,
-                existingCollections: vault.collectionPaths,
-                collectionCount: vault.collectionPaths.count
+            return (
+                Router.apply(
+                    choice: choice,
+                    candidates: candidates,
+                    thresholds: thresholds,
+                    existingCollections: vault.collectionPaths,
+                    collectionCount: vault.collectionPaths.count
+                ),
+                extras
             )
         } catch {
             // Guardrail refusals land here, and so does everything else. The
             // note is already saved; only the filing degrades.
             Log.model.error("capture reading failed: \(error.localizedDescription, privacy: .public)")
-            return Router.decideFromRetrieval(candidates, thresholds)
-                .withReason("the model declined; used retrieval instead")
+            return (
+                Router.decideFromRetrieval(candidates, thresholds)
+                    .withReason("the model declined; used retrieval instead"),
+                Extras()
+            )
         }
     }
 

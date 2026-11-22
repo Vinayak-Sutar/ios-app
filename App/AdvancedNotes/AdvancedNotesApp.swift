@@ -432,10 +432,18 @@ final class WebHost: ObservableObject {
                 // shows a blank screen with no explanation.
                 await self.server.resume()
                 let snapshot = await self.server.snapshot()
-                if snapshot.state == .listening {
-                    self.phase = .ready(await self.server.baseURL)
-                    self.reloadToken += 1
-                }
+                guard snapshot.state == .listening else { return }
+                self.phase = .ready(await self.server.baseURL)
+
+                // Reload only a page that cannot recover by itself.
+                //
+                // app.html already refreshes on visibilitychange, so a reload
+                // here changed nothing except to throw away what the page was
+                // holding - the half-typed note in the capture box above all,
+                // which is precisely what someone who switched apps for ten
+                // seconds was in the middle of. The server is back by now, so
+                // the page's own refresh lands on a live port.
+                if self.webViewStatus != "loaded" { self.reloadToken += 1 }
             }
         }
     }

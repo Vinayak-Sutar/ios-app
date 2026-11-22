@@ -89,6 +89,8 @@ final class SelfTest {
         await step("chat answers from a note") { try await self.checkChat() }
         await step("chat streams readable text") { try await self.checkChatStream() }
         await step("reminders schedule with the OS") { try await self.checkReminder() }
+        await step("a checklist item's time reaches the OS") { try await self.checkItemReminder() }
+        await step("filing by hand keeps the same note") { try await self.checkRefileKeepsTheNote() }
         await step("the map joins notes to collections") { try self.checkGraph() }
         await step("test notes are cleaned up") { try await self.cleanUp() }
 
@@ -507,6 +509,66 @@ final class SelfTest {
                 "notes are filed but nothing joins them to a collection"
             )
         }
+    }
+
+    /// A time written on one checklist line has to ring with the app shut,
+    /// which is the whole reason these are OS notifications and not cards.
+    /// They were only ever cards until this check existed.
+    private func checkItemReminder() async throws {
+        let settings = await UNUserNotificationCenter.current().notificationSettings()
+        guard settings.authorizationStatus == .authorized || settings.authorizationStatus == .provisional else {
+            throw Skip(why: "notifications are not authorised")
+        }
+
+        // The space-separated form a checklist line carries, which is the
+        // one the Python vault writes and the one that used to be rejected.
+        let when = String(Self.wallClock(minutesFromNow: 50).prefix(16))
+            .replacingOccurrences(of: "T", with: " ")
+        var note = Note(
+            title: "\(Self.marker) list",
+            body: "- [ ] water the plants \u{23F0} \(when)",
+            kind: "list"
+        )
+        note.status = "open"
+        _ = try vault.save(note, topic: nil, vector: [], needsReview: false)
+        created.append(note.id)
+
+        await reminders.sync(note)
+        let pending = await UNUserNotificationCenter.current().pendingNotificationRequests()
+        let key = Reminders.itemKey(noteID: note.id, when: when, text: "water the plants")
+        try expect(
+            pending.contains { $0.identifier == key },
+            "the OS has no alarm for the item; it had \(pending.count) pending"
+        )
+        await reminders.cancel(noteID: note.id)
+    }
+
+    /// "File it for me" must move the note, not replace it.
+    ///
+    /// It used to re-capture the body text and delete the original, so the
+    /// note came back with a new id and lost its title, its dates and its
+    /// picture. Nothing about that is visible on the filing decision itself,
+    /// which is why it survived until someone read the route.
+    private func checkRefileKeepsTheNote() async throws {
+        var note = Note(
+            title: "\(Self.marker) keeps its title",
+            body: "sourdough starter doubles in five hours in a warm kitchen"
+        )
+        note.due = Self.wallClock(minutesFromNow: 90)
+        note.source = "https://example.test/starter"
+        let vector = await embedding.embed(note.embeddingText)
+        _ = try vault.save(note, topic: nil, vector: vector, needsReview: false)
+        created.append(note.id)
+
+        guard let saved = vault.entry(note.id) else { throw Failed("the note did not save") }
+        let outcome = await capture.refile(saved)
+
+        try expect(outcome.note.id == note.id, "the note came back with a different id")
+        try expect(vault.entry(note.id) != nil, "the note is gone from the vault")
+        try expect(outcome.note.title == note.title, "the title was rewritten to \(outcome.note.title)")
+        try expect(outcome.note.due == note.due, "the due date was lost")
+        try expect(outcome.note.source == note.source, "the link it came from was lost")
+        try expect(outcome.note.created == note.created, "the note was re-dated")
     }
 
     private func cleanUp() async throws {

@@ -175,6 +175,13 @@ enum API {
         var path: String?
         /// "filed", "review" or "inbox".
         var outcome: String
+        /// Whether it ended up in a collection. The Inbox screen reads this
+        /// field and nothing else to decide which toast to show, so without
+        /// it a note that filed perfectly still reported "still not sure".
+        var filed: Bool
+        /// Why, in one line. Same text as `summary`, under the name the
+        /// Inbox screen looks for.
+        var reason: String
         var related: Int
         var steered: Bool
         var bootstrapped: Int

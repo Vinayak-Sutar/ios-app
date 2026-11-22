@@ -79,6 +79,51 @@ final class Reminders {
         }
     }
 
+    /// Alarms for the clock marks on individual checklist lines.
+    ///
+    /// These existed only as in-app cards, which meant the one case they are
+    /// for - "ring at six whether or not I am looking at this" - was the one
+    /// case they did not cover. The identifier is the same key `dueNow` uses,
+    /// so an alert dismissed in the app is not then repeated by the OS.
+    func scheduleItems(_ note: Note) async {
+        for item in Checklist.items(in: note.body) where !item.done {
+            guard let remind = item.remind,
+                  let components = Self.components(from: remind) else { continue }
+            let key = Self.itemKey(noteID: note.id, when: remind, text: item.text)
+            guard !fired.contains(key) else { continue }
+
+            let content = UNMutableNotificationContent()
+            content.title = item.text
+            content.subtitle = note.title.isEmpty ? "To-do" : note.title
+            content.sound = .default
+            content.userInfo = ["noteId": note.id, "key": key]
+
+            let request = UNNotificationRequest(
+                identifier: key,
+                content: content,
+                trigger: UNCalendarNotificationTrigger(dateMatching: components, repeats: false)
+            )
+            do {
+                try await UNUserNotificationCenter.current().add(request)
+            } catch {
+                Log.routes.error("could not schedule \(key, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            }
+        }
+    }
+
+    /// Make the OS agree with what this note now says.
+    ///
+    /// Every route that changes a note's times calls this one method rather
+    /// than remembering to cancel and reschedule in the right order. Forgetting
+    /// it is how a note captured with "remind me at six" went unscheduled
+    /// until the next cold launch, and how a deleted note kept its alarm.
+    func sync(_ note: Note) async {
+        await cancel(noteID: note.id)
+        guard note.status == "open" else { return }
+        await schedule(note)
+        await scheduleItems(note)
+    }
+
     func cancel(noteID: String) async {
         let center = UNUserNotificationCenter.current()
         let pending = await center.pendingNotificationRequests()
@@ -92,8 +137,9 @@ final class Reminders {
     /// Re-register everything on launch. Pending requests survive a relaunch,
     /// but not a reinstall — and with a 7-day sideload that is every week.
     func rescheduleAll() async {
-        for entry in vault.notes(status: "open") where entry.note.remind != nil {
+        for entry in vault.notes(status: "open") {
             await schedule(entry.note)
+            await scheduleItems(entry.note)
         }
     }
 
@@ -134,7 +180,7 @@ final class Reminders {
             for item in Checklist.items(in: entry.note.body) where !item.done {
                 guard let remind = item.remind,
                       let date = PlainDate.parse(remind), date <= nowDate else { continue }
-                let key = "item:\(entry.note.id):\(remind):\(item.text)"
+                let key = Self.itemKey(noteID: entry.note.id, when: remind, text: item.text)
                 guard !fired.contains(key), !quiet(entry.note, at: nowDate) else { continue }
                 out.append([
                     "type": "item",
@@ -245,12 +291,27 @@ final class Reminders {
         "task:\(noteID):\(when)"
     }
 
+    /// The text is part of the key, not the line number: a line moves when
+    /// something above it is deleted, and an alarm that followed the line
+    /// number would then belong to a different item.
+    static func itemKey(noteID: String, when: String, text: String) -> String {
+        "item:\(noteID):\(when):\(text)"
+    }
+
     /// `"2026-11-15T18:00:00"` — local wall-clock, no zone — into date
     /// components. Parsed by hand rather than with a formatter: a formatter
     /// configured with the wrong locale or calendar silently shifts the hour,
     /// and a reminder at the wrong time is worse than none.
     static func components(from wallClock: String) -> DateComponents? {
-        let parts = wallClock.components(separatedBy: "T")
+        // Both separators, because both occur: a note's own `remind` is
+        // written "2026-11-15T18:00:00", while the clock mark on a checklist
+        // line is written "2026-11-15 18:00" - the Python vault's form, and
+        // what anyone typing one by hand produces. Accepting only the first
+        // meant every item alarm silently failed to schedule.
+        let parts = wallClock
+            .trimmingCharacters(in: .whitespaces)
+            .replacingOccurrences(of: " ", with: "T")
+            .components(separatedBy: "T")
         guard parts.count == 2 else { return nil }
         let date = parts[0].components(separatedBy: "-")
         let time = parts[1].components(separatedBy: ":")

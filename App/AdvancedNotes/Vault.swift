@@ -117,8 +117,13 @@ final class Vault {
         return seen.sorted()
     }
 
-    /// Newest first. ULIDs sort by creation time, so sorting by id is the same
-    /// as sorting by date without parsing anything.
+    /// Newest first, unless the user has dragged something.
+    ///
+    /// `NoteOrder.position` derives a place from the id for any note that has
+    /// never been moved, so this is still date order by default - but a note
+    /// that was dragged now stays where it was put. It did not before: the
+    /// position was written to the frontmatter and nothing read it, so every
+    /// rearrangement sprang back on the next refresh.
     func notes(topic: String? = nil, kind: String? = nil, status: String? = nil) -> [Entry] {
         entries.values
             .filter { entry in
@@ -127,7 +132,7 @@ final class Vault {
                 if let status, entry.note.status != status { return false }
                 return true
             }
-            .sorted { $0.note.id > $1.note.id }
+            .sorted { NoteOrder.before($0.note, $1.note) }
     }
 
     func entry(_ id: String) -> Entry? { entries[id] }
