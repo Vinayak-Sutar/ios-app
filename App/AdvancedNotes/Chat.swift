@@ -45,13 +45,86 @@ final class Chat {
         var history: [(role: String, content: String)]
     }
 
-    /// Build the whole NDJSON response.
+    /// Answer as a stream of events, written as they are produced.
     ///
-    /// Collected rather than truly streamed: `HTTPBodySequence` can stream, but
-    /// getting an async sequence of model tokens through it correctly is not
-    /// something to write blind. The page renders tokens as they arrive either
-    /// way, so the cost is that the answer appears all at once instead of word
-    /// by word. Worth revisiting once the rest is known to work.
+    /// The sources go out the moment retrieval finishes, before the model has
+    /// written a word. That is most of the value: on-device generation takes
+    /// seconds, and during those seconds the user can already be reading which
+    /// of their notes this is going to be answered from.
+    ///
+    /// Returns immediately; the work happens in the returned stream.
+    func stream(to request: Request) -> AsyncStream<Data> {
+        AsyncStream { continuation in
+            let work = Task { @MainActor in
+                func emit(_ event: [String: Any]) {
+                    guard let data = try? JSONSerialization.data(withJSONObject: event) else { return }
+                    continuation.yield(data + Data("\n".utf8))
+                }
+
+                let picked = await retrieve(for: request.message)
+                emit([
+                    "type": "sources",
+                    "notes": picked.map { entry in
+                        [
+                            "id": entry.note.id,
+                            "title": entry.note.title.isEmpty ? "Untitled" : entry.note.title,
+                            "topic": entry.note.primaryTopic as Any? ?? NSNull()
+                        ]
+                    }
+                ])
+
+                guard Intelligence.availability.isAvailable else {
+                    if picked.isEmpty {
+                        emit(["type": "error", "message": "The on-device model isn't available yet."])
+                    } else {
+                        emit(["type": "token", "text": Self.fallbackAnswer(picked)])
+                        emit(["type": "done", "fromNotes": true])
+                    }
+                    continuation.finish()
+                    return
+                }
+
+                do {
+                    let session = LanguageModelSession(instructions: Self.instructions)
+                    let prompt = Self.prompt(
+                        message: request.message, notes: picked, history: request.history
+                    )
+
+                    // Snapshots are cumulative, so each one is diffed against
+                    // the last to get the new text. Sending the snapshot
+                    // itself would repeat the whole answer on every tick.
+                    var sent = ""
+                    var filter = SourcesLineFilter()
+                    for try await snapshot in session.streamResponse(
+                        to: prompt, options: GenerationOptions(sampling: .greedy)
+                    ) {
+                        let whole = String(describing: snapshot)
+                        guard whole.count > sent.count, whole.hasPrefix(sent) else { continue }
+                        let delta = String(whole.dropFirst(sent.count))
+                        sent = whole
+                        let safe = filter.push(delta)
+                        if !safe.isEmpty { emit(["type": "token", "text": safe]) }
+                    }
+                    let tail = filter.finish()
+                    if !tail.isEmpty { emit(["type": "token", "text": tail]) }
+
+                    emit(["type": "done", "fromNotes": !picked.isEmpty])
+                } catch {
+                    Log.model.error("chat failed: \(error.localizedDescription, privacy: .public)")
+                    emit([
+                        "type": "error",
+                        "message": "The on-device model couldn't answer that: \(error.localizedDescription)"
+                    ])
+                }
+                continuation.finish()
+            }
+            continuation.onTermination = { _ in work.cancel() }
+        }
+    }
+
+    /// The collected form, kept for the self-test: it needs the whole answer
+    /// to assert on, and a test that consumed a stream would be testing the
+    /// stream rather than the answer.
     func respond(to request: Request) async -> Data {
         var lines: [String] = []
 

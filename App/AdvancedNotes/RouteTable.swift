@@ -615,8 +615,11 @@ final class RouteTable {
                 if !content.isEmpty { history.append((role: role, content: content)) }
             }
 
-            let data = await chat.respond(to: Chat.Request(message: message, history: history))
-            return Respond.ndjson(data)
+            // Streamed, so the sources reach the page before the model has
+            // written anything.
+            return await Respond.ndjsonStream(
+                chat.stream(to: Chat.Request(message: message, history: history))
+            )
         }
 
         await server.appendRoute("POST /api/note/ai") { [vault, intelligence] request in
