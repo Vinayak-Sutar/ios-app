@@ -94,19 +94,38 @@ final class Chat {
                     // the last to get the new text. Sending the snapshot
                     // itself would repeat the whole answer on every tick.
                     var sent = ""
+                    var emitted = false
                     var filter = SourcesLineFilter()
                     for try await snapshot in session.streamResponse(
                         to: prompt, options: GenerationOptions(sampling: .greedy)
                     ) {
-                        let whole = String(describing: snapshot)
+                        let whole = Self.text(fromSnapshot: snapshot)
                         guard whole.count > sent.count, whole.hasPrefix(sent) else { continue }
                         let delta = String(whole.dropFirst(sent.count))
                         sent = whole
                         let safe = filter.push(delta)
-                        if !safe.isEmpty { emit(["type": "token", "text": safe]) }
+                        if !safe.isEmpty {
+                            emit(["type": "token", "text": safe])
+                            emitted = true
+                        }
                     }
                     let tail = filter.finish()
-                    if !tail.isEmpty { emit(["type": "token", "text": tail]) }
+                    if !tail.isEmpty {
+                        emit(["type": "token", "text": tail])
+                        emitted = true
+                    }
+
+                    // If the snapshots never lined up - not cumulative, or a
+                    // shape this does not understand - the answer is still in
+                    // the last one. One late block of text beats an empty
+                    // bubble, and this cannot double up: it only runs when
+                    // nothing was sent at all.
+                    if !emitted, !sent.isEmpty {
+                        var replay = SourcesLineFilter()
+                        var whole = replay.push(sent)
+                        whole += replay.finish()
+                        if !whole.isEmpty { emit(["type": "token", "text": whole]) }
+                    }
 
                     emit(["type": "done", "fromNotes": !picked.isEmpty])
                 } catch {
@@ -120,6 +139,31 @@ final class Chat {
             }
             continuation.onTermination = { _ in work.cancel() }
         }
+    }
+
+    /// The text inside one streamed snapshot.
+    ///
+    /// The element type of `streamResponse` has changed shape between SDKs:
+    /// it has been the partial string itself, and it is now a snapshot struct
+    /// wrapping one. `String(describing:)` reads the first correctly and
+    /// turns the second into `Snapshot(content: "…", rawContent: …)` — prose
+    /// becoming a struct dump in the chat bubble, with each delta cut out of
+    /// the middle of the dump.
+    ///
+    /// Asked for by name through a Mirror rather than cast to a type that may
+    /// not exist in whichever SDK this is compiled against. Blind compilation
+    /// is the constraint: a property that moves house is cheaper to find at
+    /// runtime than a build that cannot be run at all. It also means a CI
+    /// runner updating its Xcode cannot quietly change what the chat says.
+    static func text(fromSnapshot snapshot: Any) -> String {
+        if let string = snapshot as? String { return string }
+
+        let children = Mirror(reflecting: snapshot).children
+        if let content = children.first(where: { $0.label == "content" })?.value {
+            if let string = content as? String { return string }
+            return String(describing: content)
+        }
+        return String(describing: snapshot)
     }
 
     /// The collected form, kept for the self-test: it needs the whole answer

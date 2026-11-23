@@ -87,6 +87,7 @@ final class SelfTest {
         await step("search finds a captured note") { try await self.checkSearch() }
         await step("filing picks the right collection") { try await self.checkFiling() }
         await step("chat answers from a note") { try await self.checkChat() }
+        await step("snapshot text is read, not dumped") { try self.checkSnapshotText() }
         await step("chat streams readable text") { try await self.checkChatStream() }
         await step("reminders schedule with the OS") { try await self.checkReminder() }
         await step("a checklist item's time reaches the OS") { try await self.checkItemReminder() }
@@ -438,7 +439,10 @@ final class SelfTest {
 
         // The tell for a wrong snapshot type: Swift's reflection of a struct
         // always looks like this, and prose never does.
-        for marker in ["Response<", "(content:", "PartiallyGenerated", "GeneratedContent("] {
+        for marker in [
+            "Response<", "(content:", "PartiallyGenerated", "GeneratedContent(",
+            "Snapshot(", "rawContent"
+        ] {
             try expect(
                 !text.contains(marker),
                 "tokens look like a struct dump, not prose — snapshot type is wrong: \(text.prefix(120))"
@@ -448,7 +452,9 @@ final class SelfTest {
         checks.append(Check(
             name: "   stream detail",
             status: "pass",
-            detail: "\(events.count) events, \(text.count) characters of answer",
+            // The opening words, not just a count: a dump that slips past the
+            // markers above is obvious the moment you can see it.
+            detail: "\(events.count) events, \(text.count) characters: \(text.prefix(60))",
             ms: 0
         ))
     }
@@ -623,6 +629,28 @@ final class SelfTest {
         try expect(
             foreign.notes.contains { $0.contains("ignored") },
             "nothing in the log would say why they were ignored"
+        )
+    }
+
+    /// The extractor the chat stream depends on, checked without the model.
+    ///
+    /// Worth its own check because it fails in the one way nobody notices in
+    /// a build log: the chat still streams, still ends, still says done - and
+    /// what arrives is a description of a struct instead of a sentence.
+    private func checkSnapshotText() throws {
+        struct Snapshot {
+            var content: String
+            var rawContent: [String]
+        }
+
+        try expect(
+            Chat.text(fromSnapshot: "a plain partial string") == "a plain partial string",
+            "a bare string was not passed through"
+        )
+        try expect(
+            Chat.text(fromSnapshot: Snapshot(content: "real prose", rawContent: ["noise"])) == "real prose",
+            "the content of a snapshot struct was not found: got "
+                + Chat.text(fromSnapshot: Snapshot(content: "real prose", rawContent: ["noise"]))
         )
     }
 
