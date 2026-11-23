@@ -374,6 +374,15 @@ final class WebHost: ObservableObject {
             await server.start()
 
             DevOverrides.writeTemplateIfMissing(in: vault.root)
+            // Old builds shipped the thresholds live in that template, and an
+            // override beats a measurement, so they would silently outrank
+            // every calibration.
+            let retired = DevOverrides.retireShippedThresholds(in: vault.root)
+            if !retired.isEmpty {
+                Log.vault.notice(
+                    "overrides.json: commented out \(retired.joined(separator: ", "), privacy: .public) so a calibration can take effect"
+                )
+            }
             let (overrides, _) = DevOverrides.load()
             if let coldStart = overrides.coldStartNotes { capture.coldStartNotes = coldStart }
             if let retrievalOnly = overrides.retrievalOnly { capture.retrievalOnly = retrievalOnly }

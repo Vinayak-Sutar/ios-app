@@ -81,6 +81,53 @@ struct DevOverrides: Decodable {
         return (merged, rejected)
     }
 
+    /// The threshold lines the old template shipped, with the values it
+    /// shipped them at.
+    ///
+    /// Written by the app, not chosen by anyone: the template had all three
+    /// live, carrying the preset's own numbers.
+    static let shippedThresholds = [
+        ("fileFloor", "0.820"),
+        ("reviewFloor", "0.865"),
+        ("minMargin", "0.012")
+    ]
+
+    /// Retire those lines, once, on a file that still has them.
+    ///
+    /// An override outranks a measurement on purpose - someone typing a number
+    /// means it. But these three were typed by the app, so on any phone that
+    /// ran an earlier build they would shadow every calibration: you would
+    /// press Calibrate, watch it measure, and see filing behave exactly as
+    /// before. Commented out with the file's own underscore convention, values
+    /// intact, so nothing is lost and switching one back on is one character.
+    ///
+    /// Matched on the exact text the template wrote. A value that has been
+    /// changed does not match, and is left alone - which is the entire point
+    /// of the file.
+    @discardableResult
+    static func retireShippedThresholds(in vaultRoot: URL) -> [String] {
+        let url = vaultRoot.appendingPathComponent(relativePath)
+        guard let text = try? String(contentsOf: url, encoding: .utf8) else { return [] }
+
+        var updated = text
+        var retired: [String] = []
+        for (key, value) in shippedThresholds {
+            let line = "\"\(key)\": \(value)"
+            guard updated.contains(line) else { continue }
+            updated = updated.replacingOccurrences(of: line, with: "\"_\(key)\": \(value)")
+            retired.append(key)
+        }
+        guard !retired.isEmpty else { return [] }
+
+        do {
+            try AtomicFile.write(updated, to: url)
+            return retired
+        } catch {
+            Log.vault.error("could not tidy overrides.json: \(error.localizedDescription, privacy: .public)")
+            return []
+        }
+    }
+
     /// Written on first launch so the file is there to edit, rather than
     /// something you have to know to create.
     static func writeTemplateIfMissing(in vaultRoot: URL) {

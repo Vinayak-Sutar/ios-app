@@ -4179,13 +4179,13 @@ function aiTab() {
   if (S.state?.laptop === false) return emptyHTML('sparkle', 'Open this on your laptop', 'The AI runs on your laptop, so its settings stay there.');
   const a = S.ai;
   if (!a) { loadAi(); return `<div class="list-empty"><span class="spin ink" style="display:inline-block"></span></div>`; }
-  if (!a.running) return emptyHTML('sparkle', 'The AI isn\'t running', 'Notes still works. Start the app again to bring the AI back.');
+  if (!a.running) return emptyHTML('sparkle', 'Apple Intelligence isn\'t ready', 'Notes still works, and files what it can. Check iOS Settings → Apple Intelligence & Siri, or give it a while if it is still downloading.');
   const hw = a.hardware || {}, rec = (a.profiles.find((p) => p.name === a.auto) || {}).label || '';
   const card = (name, label, sub, extra) => `<button class="radio-card" role="radio" aria-checked="${a.chosen === name}" data-act="ai-profile" data-v="${name}"><b>${label}</b><span>${sub}</span>${extra || ''}</button>`;
   const pull = a.pull || {};
   const pulling = pull.status === 'pulling';
   return `
-    <section class="set-block"><div class="set-head"><h2 id="sgai">AI quality</h2><p class="hint">All of the AI runs on this computer. This one has ${hw.gpu_gb ? `${hw.gpu_gb} GB of graphics memory and ` : 'no separate graphics card and '}${hw.ram_gb} GB of memory, so <b>${esc(rec)}</b> suits it. Now using <b>${esc(a.roles.brain)}</b>.</p></div>
+    <section class="set-block"><div class="set-head"><h2 id="sgai">AI quality</h2><p class="hint">All of the AI runs on this iPhone, which has ${hw.ram_gb} GB of memory. Nothing you write leaves the device. Now using <b>${esc(a.roles.brain)}</b>.</p></div>
       <div class="radio-cards ai-cards" role="radiogroup" aria-labelledby="sgai">
         ${card('auto', 'Automatic', `Picks ${esc(rec)} for this computer`)}
         ${a.profiles.map((p) => card(p.name, p.label, `${esc(p.note)}`, `<span class="ai-model">${esc(p.brain)} · ${p.installed ? 'downloaded' : `${p.size_gb} GB download`}</span>`)).join('')}
@@ -4194,7 +4194,7 @@ function aiTab() {
         : pull.status === 'failed' ? `<p class="hint" style="color:var(--danger)">${esc(pull.error || 'The download failed.')}</p>`
         : pull.status === 'done' ? `<p class="hint">${esc(pull.model)} is ready.</p>` : ''}
     </section>
-    <section class="set-block"><div class="set-head"><h2>Models on this computer</h2><p class="hint">${a.total_gb} GB in the app's own folder. Models in use can't be removed; removing the others frees the space.</p></div>
+    <section class="set-block"><div class="set-head"><h2>What's doing the thinking</h2><p class="hint">Both of these come with the phone, so there is nothing to download and nothing to remove.</p></div>
       <div class="ai-models">${a.models.map((m) => `<div class="ai-row"><span class="ai-name">${esc(m.name)}</span><span class="ai-size">${m.size_gb} GB</span><span class="ai-tag">${m.in_use ? (m.loaded ? `In use · ${m.on_gpu_pct}% on the GPU` : 'In use') : 'Not used'}</span>${m.in_use ? '<span></span>' : `<button class="btn sm" data-act="ai-remove" data-v="${esc(m.name)}">${icon('trash', 14)}Remove</button>`}</div>`).join('')}</div>
     </section>
     <section class="set-block two"><div class="set-head"><h2>Think harder</h2><p class="hint">The light-bulb switch in the chat makes the AI reason step by step before answering. It's slower, but better at tricky questions.</p></div></section>`;
@@ -4209,7 +4209,7 @@ function phoneSection() {
   if (S.state?.laptop === false) return '';
   const c = S.connect;
   if (c === undefined) { loadConnect(); return ''; }
-  if (!c?.lan) return `<section class="set-block two"><div class="set-head"><h2>Your phone</h2><p class="hint">Start Notes from the desktop shortcut to use it on your phone over Wi-Fi.</p></div></section>`;
+  if (!c?.lan) return `<section class="set-block two"><div class="set-head"><h2>This device</h2><p class="hint">Everything is on this iPhone: your notes, the filing and the AI. There is nothing to connect to.</p></div></section>`;
   const phones = (c.devices || []).map((d) => `<div class="ai-row"><span class="ai-name">${esc(d.name)}</span><span class="ai-size">Added ${esc(d.added)}</span><span class="ai-tag">Last used ${esc(d.seen)}</span><button class="btn sm" data-act="device-remove" data-v="${esc(d.id)}">${icon('trash', 14)}Remove</button></div>`).join('');
   return `<section class="set-block two"><div class="set-head"><h2>Your phone</h2><p class="hint">Scan this with your phone's camera. Both need to be on the same Wi-Fi. The code changes each time Notes starts, and phones you've connected stay connected.</p></div>
       <div class="set-control">
