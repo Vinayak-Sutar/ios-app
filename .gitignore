@@ -6,3 +6,8 @@ DerivedData/
 build/
 *.ipa
 Payload/
+
+# Downloaded build artifacts. Local only: a 1.8 MB zip per build does not
+# belong in the history, and `git add -A` was quietly committing each one.
+buildss/
+*.zip
