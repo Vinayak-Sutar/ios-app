@@ -258,7 +258,7 @@ final class Vault {
 
         var stored = note
         stored.topics = topic.map { [$0] } ?? []
-        try writeAtomically(FrontmatterCodec.render(stored), to: target.url)
+        try AtomicFile.write(FrontmatterCodec.render(stored), to: target.url)
 
         entries[note.id] = Entry(
             note: stored, path: target.relative, vector: vector, needsReview: needsReview
@@ -308,23 +308,6 @@ final class Vault {
     func setReviewed(_ id: String) {
         entries[id]?.needsReview = false
         saveIndexFile()
-    }
-
-    /// Write to a staging file and replace, so a note is never half-written.
-    /// Staging lives in Caches: same volume, so the replace is a rename, and
-    /// no stray `.tmp` files appear in the user's Files view.
-    private func writeAtomically(_ text: String, to url: URL) throws {
-        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-        let staging = caches.appendingPathComponent("write-\(UUID().uuidString).tmp")
-        try FileManager.default.createDirectory(
-            at: url.deletingLastPathComponent(), withIntermediateDirectories: true
-        )
-        try Data(text.utf8).write(to: staging, options: .atomic)
-        if FileManager.default.fileExists(atPath: url.path) {
-            _ = try FileManager.default.replaceItemAt(url, withItemAt: staging)
-        } else {
-            try FileManager.default.moveItem(at: staging, to: url)
-        }
     }
 
     // MARK: - Files

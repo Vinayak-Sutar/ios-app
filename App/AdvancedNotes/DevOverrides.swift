@@ -91,8 +91,8 @@ struct DevOverrides: Decodable {
             {
               "_comment": "Edit, then reopen the app. Delete a line to use the default.",
 
-              "_coldStartNotes": "notes before collections may form; 20 is the measured default, 5 is better for trying it out",
-              "coldStartNotes": 5,
+              "_coldStartNotes": "notes before collections may form. 20 is the measured default and the one in force; remove the underscore below to use 5 instead, which reaches filing in one sitting while trying it out.",
+              "_coldStartNotes_tryItOut": 5,
 
               "_thresholds": "Calibrate on the diagnostics page measures these on this device and they are used automatically. Remove the underscore from a key below to pin it by hand instead - a number here outranks the measurement.",
 

@@ -22,8 +22,19 @@ import UserNotifications
 final class Reminders {
 
     private let vault: Vault
+    /// Keys whose alert has been shown, for lookup...
     private var fired: Set<String> = []
+    /// ...and in the order they arrived, for forgetting.
+    ///
+    /// A Set alone cannot say which keys are old, so trimming it dropped an
+    /// arbitrary subset - which could include this morning's, bringing an
+    /// alert back that had already been dismissed.
+    private var firedOrder: [String] = []
     private let firedURL: URL
+
+    /// Trimmed at five thousand, down to the most recent two thousand.
+    static let firedLimit = 5_000
+    static let firedKeep = 2_000
 
     init(vault: Vault) {
         self.vault = vault
@@ -268,8 +279,13 @@ final class Reminders {
     /// The page posts back the keys it has shown, so nothing fires twice.
     func markFired(_ keys: [String]) {
         guard !keys.isEmpty else { return }
-        fired.formUnion(keys)
+        for key in keys { remember(key) }
         saveFired()
+    }
+
+    private func remember(_ key: String) {
+        guard fired.insert(key).inserted else { return }
+        firedOrder.append(key)
     }
 
     /// On a rebuild, anything already in the past is marked fired rather than
@@ -280,7 +296,7 @@ final class Reminders {
             guard let remind = entry.note.remind,
                   let date = Self.date(from: remind),
                   date <= now else { continue }
-            fired.insert(Self.taskKey(noteID: entry.note.id, when: remind))
+            remember(Self.taskKey(noteID: entry.note.id, when: remind))
         }
         saveFired()
     }
@@ -342,14 +358,20 @@ final class Reminders {
     private func loadFired() {
         guard let data = try? Data(contentsOf: firedURL),
               let keys = try? JSONDecoder().decode([String].self, from: data) else { return }
+        // The file is already in order: it is written from `firedOrder`.
+        firedOrder = keys
         fired = Set(keys)
     }
 
     private func saveFired() {
         // Unbounded growth is not a concern at prototype scale, but a cap
         // keeps the file from becoming a liability if it ever is.
-        if fired.count > 5000 { fired = Set(fired.suffix(2000)) }
-        guard let data = try? JSONEncoder().encode(Array(fired)) else { return }
+        if firedOrder.count > Self.firedLimit {
+            let drop = firedOrder.count - Self.firedKeep
+            fired.subtract(firedOrder.prefix(drop))
+            firedOrder.removeFirst(drop)
+        }
+        guard let data = try? JSONEncoder().encode(firedOrder) else { return }
         try? data.write(to: firedURL, options: .atomic)
     }
 }

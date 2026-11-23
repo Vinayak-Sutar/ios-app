@@ -148,15 +148,7 @@ final class RouteTable {
         }
 
         await server.appendRoute("GET /api/agenda") { [vault] _ in
-            // Nothing is scheduled yet - reminders are M2 - but dated notes
-            // already belong here.
-            let due = await vault.notes(status: "open").filter { $0.note.due != nil }
-            return await Respond.json(API.Agenda(
-                notes: due.map { API.NoteBrief($0.note, path: $0.path, needsReview: $0.needsReview) },
-                items: [],
-                lists: [],
-                anytime: []
-            ))
+            await Respond.json(Self.agenda(vault))
         }
 
         await server.appendRoute("GET /api/due") { [reminders] _ in
@@ -227,34 +219,146 @@ final class RouteTable {
         }
     }
 
+    /// The sidebar's collection tree.
+    ///
+    /// Nested, because collections nest: the gate files "Video Games" under
+    /// "Gaming". This was a flat list, so a nested collection showed up as an
+    /// unrelated top-level row and its parent's badge ignored it - while the
+    /// map, built from the same vault, drew the parent link correctly.
     @MainActor
-    private static func state(vault: Vault, embedding: EmbedderBox, capture: Capture) -> API.State {
-        var nodes: [API.TopicNode] = []
+    private static func topicNodes(_ vault: Vault) -> [API.TopicNode] {
+        var counts: [String: Int] = [:]
+        var views: [String: [String: Int]] = [:]
+
         for path in vault.collectionPaths {
             let members = vault.notes(topic: path)
-            var views: [String: Int] = [:]
+            counts[path] = members.count
+            var kinds: [String: Int] = [:]
             for member in members where member.note.kind != "note" {
-                views[member.note.kind, default: 0] += 1
+                kinds[member.note.kind, default: 0] += 1
             }
-            nodes.append(API.TopicNode(
-                id: path,
-                name: path.components(separatedBy: "/").last ?? path,
-                path: path,
+            views[path] = kinds
+        }
+
+        // `count` is the subtree total, which is what the badge shows, and
+        // `own` the notes directly inside. The arithmetic is TopicTree's, so
+        // it is tested on Windows rather than eyeballed on a phone.
+        func convert(_ node: TopicTree.Node) -> API.TopicNode {
+            API.TopicNode(
+                id: node.path,
+                name: node.name,
+                path: node.path,
                 state: "active",
-                count: members.count,
-                own: members.count,
-                views: views,
-                children: []
+                count: node.total,
+                own: node.own,
+                views: views[node.path] ?? [:],
+                children: node.children.map(convert)
+            )
+        }
+        return TopicTree.build(counts: counts).map(convert)
+    }
+
+    /// Everything with a time: dated notes, dated checklist lines, lists with
+    /// a deadline, and the tasks with no date at all.
+    @MainActor
+    private static func agenda(_ vault: Vault) -> API.Agenda {
+        let open = vault.notes(status: "open")
+        let today = PlainDate.parse(Timestamp.localNow())
+
+        let dated = open.filter { $0.note.due != nil }
+        var items: [API.AgendaItem] = []
+        var lists: [API.AgendaList] = []
+
+        for entry in open {
+            let note = entry.note
+            let checklist = Checklist.items(in: note.body)
+
+            for item in checklist where item.due != nil || item.remind != nil {
+                // A ticked item is worth showing for a few days - it is how
+                // the Done group has anything in it - but not forever.
+                if item.done, !Self.recentlyDone(item, today: today) { continue }
+                items.append(API.AgendaItem(
+                    noteId: note.id,
+                    line: item.line,
+                    text: item.text,
+                    listTitle: note.title.ifEmpty("Untitled"),
+                    done: item.done,
+                    day: item.due ?? item.remind.map { String($0.prefix(10)) },
+                    // Normalised to the T form: the page hands this straight
+                    // to `new Date()`, and a space-separated time is not
+                    // something every engine parses.
+                    remind: item.remind.map { $0.replacingOccurrences(of: " ", with: "T") },
+                    repeatRule: item.repeatRule
+                ))
+            }
+
+            // A list earns a line on Today if it has a deadline or a daily
+            // check-in, is not finished, and has not been hushed.
+            guard let progress = Checklist.progress(in: note.body),
+                  note.due != nil || note.checkin != nil,
+                  progress[0] < progress[1] else { continue }
+            if let until = note.quietUntil, let quiet = PlainDate.parse(until),
+               let today, today < quiet {
+                continue
+            }
+
+            lists.append(API.AgendaList(
+                noteId: note.id,
+                title: note.title.ifEmpty("Untitled"),
+                due: note.due,
+                done: progress[0],
+                total: progress[1],
+                next: checklist.first(where: { !$0.done })?.text,
+                pace: today.flatMap { day in
+                    Pace.of(
+                        done: progress[0],
+                        total: progress[1],
+                        start: PlainDate.parse(note.created),
+                        due: note.due.flatMap(PlainDate.parse),
+                        today: day
+                    )
+                }
             ))
         }
 
+        // Things to do with no date on them. Not everything undated: a note is
+        // not a task, and the Anytime list is for what you meant to do.
+        let anytime = open.filter {
+            $0.note.kind == "task" && $0.note.due == nil && $0.note.remind == nil
+        }
+
+        return API.Agenda(
+            notes: dated.map { API.NoteBrief($0.note, path: $0.path, needsReview: $0.needsReview) },
+            items: items,
+            lists: lists,
+            anytime: anytime.map { API.NoteBrief($0.note, path: $0.path, needsReview: $0.needsReview) }
+        )
+    }
+
+    /// A ticked item stays on the agenda for a week, then stops.
+    nonisolated private static func recentlyDone(_ item: Checklist.Item, today: PlainDate?) -> Bool {
+        guard let today else { return false }
+        guard let completed = item.completed, let day = PlainDate.parse(completed) else {
+            // Ticked with no date on the tick: recent enough to show, since
+            // the alternative is an item that vanishes the moment it is done.
+            return true
+        }
+        let age = day.days(until: today)
+        return age >= 0 && age <= 7
+    }
+
+    @MainActor
+    private static func state(vault: Vault, embedding: EmbedderBox, capture: Capture) -> API.State {
+        let nodes = topicNodes(vault)
         let coldStart = max(0, capture.coldStartNotes - vault.entries.count)
         return API.State(
             tree: nodes,
             inbox: vault.inbox.count,
             review: vault.needingReview.count,
             notes: vault.entries.count,
-            topics: nodes.count,
+            // Every collection, not just the top-level rows: this is the
+            // number the settings screen shows as "collections".
+            topics: vault.collectionPaths.count,
             embedder: embedding.identifier,
             router: Intelligence.availability.isAvailable ? "apple-on-device" : "retrieval-only",
             profile: "main",
@@ -378,7 +482,7 @@ final class RouteTable {
             ))
         }
 
-        await server.appendRoute("POST /api/note/new") { [vault] request in
+        await server.appendRoute("POST /api/note/new") { [vault, embedding] request in
             let body = try await Respond.body(request)
             var note = Note(
                 title: body["title"] as? String ?? "Untitled",
@@ -387,7 +491,14 @@ final class RouteTable {
             )
             note.updated = Timestamp.utcNow()
             let topic = (body["topic"] as? String).flatMap { $0.isEmpty ? nil : $0 }
-            let path = (try? await vault.save(note, topic: topic, vector: [], needsReview: false)) ?? ""
+            // Embedded on the way in. Saved with an empty vector, a note made
+            // with New note was invisible to search, to suggestions and to
+            // every collection centroid until something edited it - which for
+            // a note you wrote and filed by hand may be never.
+            let vector = await embedding.embed(note.embeddingText)
+            let path = (try? await vault.save(
+                note, topic: topic, vector: vector, needsReview: false
+            )) ?? ""
             return await Respond.json(API.NoteDetail(note, path: path, needsReview: false, related: []))
         }
 
@@ -548,8 +659,10 @@ final class RouteTable {
     /// table: there is nothing to keep in step, and nothing a rebuild can
     /// lose. The same article shared two ways collapses to one entry because
     /// the key has its tracking parameters stripped.
+    /// Not private: housekeeping needs the live set of link keys to know
+    /// which stored previews and thumbnails point at nothing.
     @MainActor
-    private static func linkIndex(_ vault: Vault) -> [(key: String, url: URL, notes: [Vault.Entry])] {
+    static func linkIndex(_ vault: Vault) -> [(key: String, url: URL, notes: [Vault.Entry])] {
         var found: [String: (url: URL, notes: [Vault.Entry])] = [:]
         var order: [String] = []
 
@@ -718,6 +831,71 @@ final class RouteTable {
             ],
             body: data
         )
+    }
+
+    /// What is doing the thinking, in the shape Settings' AI tab reads.
+    ///
+    /// Honest rather than flattering: the model's own availability decides
+    /// `running`, so while Apple Intelligence is still downloading its assets
+    /// the panel says so instead of claiming an engine that cannot answer.
+    @MainActor
+    private static func engine(_ embedding: EmbedderBox) -> [String: Any] {
+        let availability = Intelligence.availability
+        let memory = Double(ProcessInfo.processInfo.physicalMemory) / 1_073_741_824
+        let brain = availability.isAvailable
+            ? "Apple Intelligence, on this iPhone"
+            : "Apple Intelligence (\(availability.describe))"
+
+        // Spelled out with their types rather than nested in one literal: a
+        // heterogeneous dictionary inside another has no contextual type to
+        // be inferred from, and finding that out costs a round trip to a CI
+        // runner.
+        let roles: [String: Any] = [
+            "brain": brain,
+            "vision": "Vision text recognition",
+            "embedder": embedding.identifier,
+            "think": NSNull()
+        ]
+        // No download sizes and no GPU split: nothing here was fetched and
+        // nothing can be removed, which is rather the point of it.
+        let profiles: [[String: Any]] = [[
+            "name": "apple",
+            "label": "On-device",
+            "note": "Apple's own model, already on the phone. Nothing to download and nothing leaves the device.",
+            "brain": brain,
+            "installed": true,
+            "size_gb": 0
+        ]]
+        let models: [[String: Any]] = [
+            [
+                "name": brain,
+                "size_gb": 0,
+                "in_use": true,
+                "loaded": availability.isAvailable,
+                "on_gpu_pct": 100
+            ],
+            [
+                "name": embedding.identifier,
+                "size_gb": 0,
+                "in_use": true,
+                "loaded": embedding.info != nil,
+                "on_gpu_pct": 100
+            ]
+        ]
+        let pull: [String: Any] = ["status": "idle", "percent": 0]
+
+        return [
+            "running": availability.isAvailable,
+            "chosen": "apple",
+            "auto": "apple",
+            "active": "apple",
+            "hardware": ["ram_gb": Int(memory.rounded())],
+            "roles": roles,
+            "profiles": profiles,
+            "models": models,
+            "total_gb": 0,
+            "pull": pull
+        ]
     }
 
     nonisolated private static func captureResult(_ outcome: Capture.Outcome) -> API.CaptureResult {
@@ -892,6 +1070,30 @@ final class RouteTable {
         }
         await server.appendRoute("POST /api/undo") { [vault, embedding, reminders] _ in
             Respond.json(await Undo.perform(vault: vault, embedding: embedding, reminders: reminders))
+        }
+
+        // Settings' AI tab, which was written for the Windows app's Ollama.
+        // It 404'd, and the page's own fallback for that is "The AI isn't
+        // running" - on the one device where the engine genuinely is running,
+        // and is the whole reason the app exists. So it answers honestly in
+        // the shape the panel reads: one profile, no downloads, nothing to
+        // remove.
+        await server.appendRoute("GET /api/ai") { [embedding] _ in
+            await Respond.jsonObject(Self.engine(embedding))
+        }
+        // Choosing a profile is a no-op here - there is one engine and no
+        // choice to make - but the card is clickable, and a 404 behind it
+        // would raise an error toast for a button that changed nothing.
+        await server.appendRoute("POST /api/ai") { [embedding] _ in
+            await Respond.jsonObject(Self.engine(embedding))
+        }
+
+        // Pairing a phone over Wi-Fi, which is what the Windows app's
+        // "Your phone" panel is for. There is nothing to pair with here; the
+        // answer keeps the panel quiet instead of leaving it to retry a 404
+        // on every settings render.
+        await server.appendRoute("GET /api/connect") { _ in
+            Respond.jsonObject(["lan": false, "devices": [[String: Any]]()])
         }
 
         // Personal notes is the WhatsApp import, prepared by hand on the

@@ -130,9 +130,46 @@ enum API {
 
     struct Agenda: Encodable {
         var notes: [NoteBrief]
-        var items: [String]
-        var lists: [String]
+        var items: [AgendaItem]
+        var lists: [AgendaList]
         var anytime: [NoteBrief]
+    }
+
+    /// One dated line inside a checklist, as Today and Reminders draw it.
+    ///
+    /// These were sent as an empty array while `dueNow` already computed them
+    /// for its alert cards, so a dated to-do line existed everywhere except
+    /// on the two screens whose job is dates.
+    struct AgendaItem: Encodable {
+        var noteId: String
+        var line: Int
+        var text: String
+        /// The list it lives in, shown beside the item.
+        var listTitle: String
+        var done: Bool
+        /// The day it is due, `yyyy-MM-dd`. The page counts an item with only
+        /// a day until the end of that day.
+        var day: String?
+        /// The time it should speak up, if it has one.
+        var remind: String?
+        var repeatRule: String?
+
+        enum CodingKeys: String, CodingKey {
+            case noteId, line, text, listTitle, done, day, remind
+            case repeatRule = "repeat"
+        }
+    }
+
+    /// A to-do list with a deadline or a daily check-in, and how it is going.
+    struct AgendaList: Encodable {
+        var noteId: String
+        var title: String
+        var due: String?
+        var done: Int
+        var total: Int
+        /// The next unticked item, which is what the line offers to do.
+        var next: String?
+        var pace: Pace.Report?
     }
 
     struct Suggestion: Encodable {

@@ -25,21 +25,86 @@ public enum FrontmatterCodec {
 
     // MARK: - Emitting
 
+    /// Characters that would change what the line means.
+    static let risky: Set<Character> = [":", "#", "[", "]", "{", "}", ",", "\"", "\u{27}"]
+
+    /// Characters YAML reads as an instruction when a value starts with one:
+    /// a block scalar, an anchor, an alias, a tag, a directive. Quoted here
+    /// even though the parser below would not be fooled, because the Python
+    /// vault reads these files with a real YAML parser that would be.
+    static let riskyFirst: Set<Character> = ["-", "?", "|", ">", "&", "*", "!", "%", "@", "`"]
+
     /// Quote when the value is empty, holds a character that would change the
-    /// meaning of the line, or has leading/trailing whitespace that would be
-    /// lost. Mirrors the Python `_fm_scalar` regex.
+    /// meaning of the line, starts with one YAML would act on, or has
+    /// leading/trailing whitespace that would be lost.
     static func emitScalar(_ value: String) -> String {
         guard let first = value.first, let last = value.last else { return "\"\"" }
-        let risky: Set<Character> = [":", "#", "[", "]", "{", "}", ",", "\"", "\u{27}"]
         let needsQuote =
-            value.contains(where: { risky.contains($0) })
+            value.contains(where: { risky.contains($0) || $0.isNewline || $0 == "\t" })
+            || riskyFirst.contains(first)
             || first.isWhitespace
             || last.isWhitespace
         guard needsQuote else { return value }
-        let escaped = value
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
-        return "\"" + escaped + "\""
+        return "\"" + escape(value) + "\""
+    }
+
+    /// Escape what cannot survive inside one line.
+    ///
+    /// A newline in a title was previously written out as a newline, which put
+    /// a second line inside the frontmatter block: usually dropped on reload,
+    /// and if the stray text happened to be `---`, the closing marker moved
+    /// and the body was truncated. Titles come from pastes and from a model,
+    /// so neither is hypothetical.
+    ///
+    /// Written scalar by scalar, not character by character. Swift treats
+    /// CRLF as one Character, so a switch over Characters would not match
+    /// either half of it - the same grapheme trap that once made every note
+    /// from the Windows vault parse as a bodyless blob.
+    static func escape(_ value: String) -> String {
+        var out = ""
+        for scalar in value.unicodeScalars {
+            switch scalar {
+            case "\\": out += "\\\\"
+            case "\"": out += "\\\""
+            case "\n": out += "\\n"
+            case "\r": out += "\\r"
+            case "\t": out += "\\t"
+            default: out.unicodeScalars.append(scalar)
+            }
+        }
+        return out
+    }
+
+    /// The inverse, in one pass.
+    ///
+    /// Sequential `replacingOccurrences` cannot do this: unescaping `\\\\`
+    /// before `\\n` turns a literal backslash-n into a newline, and doing it
+    /// the other way round has the matching flaw. An unrecognised escape is
+    /// left exactly as it was found rather than being half-eaten.
+    static func unescape(_ value: String) -> String {
+        var out = ""
+        var escaped = false
+        for character in value {
+            if escaped {
+                switch character {
+                case "n": out += "\n"
+                case "r": out += "\r"
+                case "t": out += "\t"
+                case "\\": out += "\\"
+                case "\"": out += "\""
+                default:
+                    out.append("\\")
+                    out.append(character)
+                }
+                escaped = false
+            } else if character == "\\" {
+                escaped = true
+            } else {
+                out.append(character)
+            }
+        }
+        if escaped { out.append("\\") }
+        return out
     }
 
     static func emitOrder(_ value: Double) -> String {
@@ -93,10 +158,7 @@ public enum FrontmatterCodec {
     static func parseScalar(_ raw: String) -> String? {
         let text = raw.trimmingCharacters(in: .whitespaces)
         if text.count >= 2, text.hasPrefix("\""), text.hasSuffix("\"") {
-            let inner = String(text.dropFirst().dropLast())
-            return inner
-                .replacingOccurrences(of: "\\\"", with: "\"")
-                .replacingOccurrences(of: "\\\\", with: "\\")
+            return unescape(String(text.dropFirst().dropLast()))
         }
         if text.isEmpty || text == "~" || text == "null" { return nil }
         return text

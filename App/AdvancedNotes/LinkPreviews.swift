@@ -95,6 +95,28 @@ final class LinkPreviews {
 
     func preview(for key: String) -> Preview? { previews[key] }
 
+    /// Every thumbnail a stored preview still points at.
+    func thumbNames() -> Set<String> {
+        Set(previews.values.compactMap(\.thumb))
+    }
+
+    /// Drop previews for links that appear in no note any more.
+    ///
+    /// A link lives in the text of a note, so editing the text can retire one.
+    /// Its title and thumbnail then describe something the vault no longer
+    /// mentions, and keeping them means the Links page can show a tile for a
+    /// link that is not there.
+    @discardableResult
+    func forget(keysNotIn live: Set<String>) -> Int {
+        let stale = previews.keys.filter { !live.contains($0) }
+        guard !stale.isEmpty else { return 0 }
+        for key in stale { previews.removeValue(forKey: key) }
+        order.removeAll { !live.contains($0) }
+        save()
+        setOrder(order)
+        return stale.count
+    }
+
     /// The user's own tile order, with anything new first.
     ///
     /// New links lead rather than trail: a link just saved is the one being

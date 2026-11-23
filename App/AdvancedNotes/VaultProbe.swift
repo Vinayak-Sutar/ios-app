@@ -36,7 +36,7 @@ final class VaultProbe {
         let url = inbox.appendingPathComponent("storage-check.md")
         do {
             try ensureDirectories()
-            try writeAtomically(FrontmatterCodec.render(note), to: url)
+            try AtomicFile.write(FrontmatterCodec.render(note), to: url)
             let text = try String(contentsOf: url, encoding: .utf8)
             let reloaded = FrontmatterCodec.load(text)
             try? FileManager.default.removeItem(at: url)
@@ -47,24 +47,6 @@ final class VaultProbe {
             return (true, nil)
         } catch {
             return (false, error.localizedDescription)
-        }
-    }
-
-    /// Write to a temporary file and replace, so a note can never be left
-    /// half-written. The temp file goes in Caches rather than beside the note,
-    /// both because it is on the same volume (making the replace a rename) and
-    /// so stray `.tmp` files never appear in the user's Files view.
-    func writeAtomically(_ text: String, to url: URL) throws {
-        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-        let staging = caches.appendingPathComponent("write-\(UUID().uuidString).tmp")
-        try FileManager.default.createDirectory(
-            at: url.deletingLastPathComponent(), withIntermediateDirectories: true
-        )
-        try Data(text.utf8).write(to: staging, options: .atomic)
-        if FileManager.default.fileExists(atPath: url.path) {
-            _ = try FileManager.default.replaceItemAt(url, withItemAt: staging)
-        } else {
-            try FileManager.default.moveItem(at: staging, to: url)
         }
     }
 

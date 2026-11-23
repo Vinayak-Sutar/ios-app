@@ -419,6 +419,11 @@ final class WebHost: ObservableObject {
                         Log.vault.notice("cold start created \(created.count, privacy: .public) collections")
                     }
                 }
+
+                // After the scan, so it works from a vault that has actually
+                // been read, and at launch rather than on delete, so undo can
+                // still put a note back with its picture attached.
+                Housekeeping.sweep(vault: vault, previews: previews)
             }
 
             let snapshot = await server.snapshot()
