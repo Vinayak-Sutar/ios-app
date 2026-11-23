@@ -8,10 +8,21 @@ final class Gardener {
 
     private let vault: Vault
     private let embedding: EmbedderBox
+    /// Read through a closure, not copied at init.
+    ///
+    /// These were a fresh `Thresholds.appleGuess(...)` on every call, which
+    /// meant the gardener quietly ignored `overrides.json` and anything
+    /// calibration recommended: filing used one set of numbers and merging
+    /// and dissolving used another. Two taxonomies disagreeing about what
+    /// "the same thing" means is the hardest kind of result to interpret.
+    /// A closure also keeps the live value, since the real thresholds only
+    /// arrive once the embedder has reported which one it is.
+    private let thresholds: () -> Thresholds
 
-    init(vault: Vault, embedding: EmbedderBox) {
+    init(vault: Vault, embedding: EmbedderBox, thresholds: @escaping () -> Thresholds) {
         self.vault = vault
         self.embedding = embedding
+        self.thresholds = thresholds
     }
 
     // MARK: - Cold start
@@ -49,7 +60,7 @@ final class Gardener {
                 existing: vault.gateCandidates(),
                 aliases: vault.aliases,
                 proposedVector: nameVector,
-                thresholds: Thresholds.appleGuess(embedderID: embedding.identifier)
+                thresholds: thresholds()
             )
             guard case let .create(folder) = outcome else { continue }
 
@@ -88,6 +99,9 @@ final class Gardener {
     func proposals() -> [Proposal] {
         var out: [Proposal] = []
         let collections = vault.gateCandidates().filter { !$0.centroid.isEmpty }
+        // Once, outside the pair loop: it is the same number every time, and
+        // reading it per comparison was quadratic for no reason.
+        let sameThing = thresholds().dedupeCentroid
 
         // Two collections that have become the same thing.
         for i in 0..<collections.count {
@@ -95,7 +109,7 @@ final class Gardener {
                 let a = collections[i]
                 let b = collections[j]
                 let score = Vectors.cosine(a.centroid, b.centroid)
-                guard score >= Thresholds.appleGuess(embedderID: "x").dedupeCentroid else { continue }
+                guard score >= sameThing else { continue }
 
                 // The smaller one folds into the larger: fewer notes move,
                 // and the name that survives is the one with more behind it.

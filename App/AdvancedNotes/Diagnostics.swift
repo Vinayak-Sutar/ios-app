@@ -17,12 +17,18 @@ final class Diagnostics {
     /// Shared with the capture pipeline. Two `AppleEmbedder`s would mean
     /// loading the model assets twice for no reason.
     private let embedding: EmbedderBox
+    /// The thresholds filing is really using, not the preset they started
+    /// from. This page is the instrument; an instrument that reports the
+    /// default while the app runs on an override is worse than no instrument,
+    /// because it is believed.
+    private let thresholds: () -> Thresholds
     private var lastProbes: Probes?
 
-    init(embedding: EmbedderBox) {
+    init(embedding: EmbedderBox, thresholds: @escaping () -> Thresholds) {
         self.intelligence = Intelligence()
         self.vault = VaultProbe()
         self.embedding = embedding
+        self.thresholds = thresholds
     }
 
 
@@ -127,7 +133,7 @@ final class Diagnostics {
             embedder: await embedderInfo(),
             sentenceEmbedding: Self.sentenceEmbeddingInfo(),
             storage: vault.info(),
-            thresholds: Thresholds.appleGuess(embedderID: embedding.identifier),
+            thresholds: thresholds(),
             probes: lastProbes,
             bundle: Respond.bundleListing(),
             generatedAt: Timestamp.utcNow()

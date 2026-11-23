@@ -332,11 +332,13 @@ final class WebHost: ObservableObject {
                 embedding: embedding,
                 thresholds: Thresholds.appleGuess(embedderID: "pending")
             )
-            let diagnostics = Diagnostics(embedding: embedding)
+            let diagnostics = Diagnostics(embedding: embedding, thresholds: { capture.thresholds })
             let chat = Chat(vault: vault, embedding: embedding, thresholds: { capture.thresholds })
             let reminders = Reminders(vault: vault)
             let images = ImageCapture(vault: vault, capture: capture, embedding: embedding)
-            let gardener = Gardener(vault: vault, embedding: embedding)
+            let gardener = Gardener(
+                vault: vault, embedding: embedding, thresholds: { capture.thresholds }
+            )
             let calibration = CalibrationRun(embedding: embedding, vault: vault)
             let previews = LinkPreviews(vault: vault)
             let selfTest = SelfTest(
