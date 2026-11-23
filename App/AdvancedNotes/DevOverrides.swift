@@ -94,12 +94,14 @@ struct DevOverrides: Decodable {
               "_coldStartNotes": "notes before collections may form; 20 is the measured default, 5 is better for trying it out",
               "coldStartNotes": 5,
 
-              "_fileFloor": "below this similarity a note waits in Inbox. Measured on device: unrelated notes score ~0.840, related ~0.896",
-              "fileFloor": 0.820,
-              "_reviewFloor": "above fileFloor but below this: filed, but flagged",
-              "reviewFloor": 0.865,
-              "_minMargin": "the winner must beat the runner-up by this much",
-              "minMargin": 0.012,
+              "_thresholds": "Calibrate on the diagnostics page measures these on this device and they are used automatically. Remove the underscore from a key below to pin it by hand instead - a number here outranks the measurement.",
+
+              "_fileFloor": 0.820,
+              "_fileFloor_note": "below this similarity a note waits in Inbox. The preset: unrelated notes score ~0.840, related ~0.896",
+              "_reviewFloor": 0.865,
+              "_reviewFloor_note": "above fileFloor but below this: filed, but flagged",
+              "_minMargin": 0.012,
+              "_minMargin_note": "the winner must beat the runner-up by this much",
 
               "_retrievalOnly": "true skips the language model and files on similarity alone",
               "retrievalOnly": false

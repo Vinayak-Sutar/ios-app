@@ -17,10 +17,14 @@ final class CalibrationRun {
 
     private let embedding: EmbedderBox
     private let vault: Vault
+    /// Hands the derived thresholds to the capture pipeline, so a measurement
+    /// takes effect on the next note rather than on the next launch.
+    private let apply: (Thresholds) -> Void
 
-    init(embedding: EmbedderBox, vault: Vault) {
+    init(embedding: EmbedderBox, vault: Vault, apply: @escaping (Thresholds) -> Void) {
         self.embedding = embedding
         self.vault = vault
+        self.apply = apply
     }
 
     struct Report: Encodable {
@@ -41,6 +45,16 @@ final class CalibrationRun {
 
         var recommendation: String
         var exportedTo: String?
+
+        /// Whether the derived thresholds are now the ones the app files
+        /// with. Measuring and then not using the measurement was the whole
+        /// problem this field exists to answer.
+        var applied: Bool = false
+        var appliedDetail: String?
+        /// What filing will actually use from here on, which can differ from
+        /// `derived` because `overrides.json` still outranks a measurement.
+        var inForce: Thresholds?
+
         var error: String?
     }
 
@@ -85,6 +99,7 @@ final class CalibrationRun {
         let centredScore = derivedCentred.map { simulate(vectors: centred, topics: topics, thresholds: $0) }
 
         let exported = export(notes: notes, vectors: vectors)
+        let put = putIntoForce(derived, measurement: raw)
 
         return Report(
             ranAt: Timestamp.utcNow(),
@@ -99,8 +114,88 @@ final class CalibrationRun {
             centredScore: centredScore,
             recommendation: Self.recommend(raw: raw, centred: cooked, score: score, centredScore: centredScore),
             exportedTo: exported,
+            applied: put.applied,
+            appliedDetail: put.detail,
+            inForce: put.inForce,
             error: nil
         )
+    }
+
+    /// Keep the derived thresholds and start using them.
+    ///
+    /// **The raw ones, never the centred ones.** Routing compares raw
+    /// vectors, so a threshold measured after removing the shared mean
+    /// direction is a number from a different space — it would read as a
+    /// plausible 0.8-something and quietly mean nothing. If centring turns
+    /// out to be worth it, that is a change to how notes are compared, and
+    /// the thresholds follow it rather than leading.
+    ///
+    /// `derive` has already refused anything with no usable separation and
+    /// range-checked what it returned, so a value arriving here is one worth
+    /// using: measured on this device, against this embedder, which is more
+    /// than the preset can say.
+    private func putIntoForce(
+        _ derived: Thresholds?, measurement: Calibration.Measurement?
+    ) -> (applied: Bool, detail: String, inForce: Thresholds?) {
+        guard let derived, let measurement else {
+            return (false, "nothing usable to apply; the preset stands", nil)
+        }
+
+        let stored = CalibratedThresholds.Stored(
+            measuredAt: Timestamp.utcNow(),
+            gap: measurement.gap,
+            verdict: measurement.verdict,
+            thresholds: derived
+        )
+        do {
+            try CalibratedThresholds.save(stored, to: CalibratedThresholds.url(in: vault.root))
+        } catch {
+            // Applying without keeping would file the next hour's notes to
+            // one set of numbers and everything after a restart to another.
+            Log.embed.error("could not keep the calibration: \(error.localizedDescription, privacy: .public)")
+            return (false, "measured, but could not be saved: \(error.localizedDescription)", nil)
+        }
+
+        // The same order of authority the app uses at launch, so pressing
+        // Calibrate cannot put the app into a state a relaunch undoes.
+        let (overrides, _) = DevOverrides.load()
+        let (inForce, notes) = CalibratedThresholds.effective(
+            preset: derived,
+            calibrated: stored,
+            overrides: overrides,
+            embedderID: derived.embedderID
+        )
+        apply(inForce)
+        for note in notes { Log.vault.notice("thresholds: \(note, privacy: .public)") }
+
+        var detail = String(
+            format: "filing now uses fileFloor %.3f, reviewFloor %.3f, margin %.3f",
+            inForce.fileFloor, inForce.reviewFloor, inForce.minMargin
+        )
+        let shadowed = Self.differing(derived, inForce)
+        if shadowed.isEmpty {
+            detail += ". Delete _lab/calibrated.json to go back to the preset."
+        } else {
+            // Naming them matters: a hand-written number outranking the
+            // measurement is correct behaviour, but silently is not, and
+            // "nothing changed" is indistinguishable from a broken button.
+            detail += ". _dev/overrides.json still sets "
+                + shadowed.joined(separator: ", ")
+                + ", which outranks a measurement - delete those lines to use this one."
+        }
+        return (true, detail, inForce)
+    }
+
+    /// Which of the six numbers a later source overwrote.
+    static func differing(_ measured: Thresholds, _ inForce: Thresholds) -> [String] {
+        var out: [String] = []
+        if measured.fileFloor != inForce.fileFloor { out.append("fileFloor") }
+        if measured.reviewFloor != inForce.reviewFloor { out.append("reviewFloor") }
+        if measured.minMargin != inForce.minMargin { out.append("minMargin") }
+        if measured.dedupeName != inForce.dedupeName { out.append("dedupeName") }
+        if measured.dedupeCentroid != inForce.dedupeCentroid { out.append("dedupeCentroid") }
+        if measured.maxCollections != inForce.maxCollections { out.append("maxCollections") }
+        return out
     }
 
     /// File every note against collections built from the other notes, and

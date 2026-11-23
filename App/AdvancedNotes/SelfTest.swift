@@ -91,6 +91,7 @@ final class SelfTest {
         await step("reminders schedule with the OS") { try await self.checkReminder() }
         await step("a checklist item's time reaches the OS") { try await self.checkItemReminder() }
         await step("filing by hand keeps the same note") { try await self.checkRefileKeepsTheNote() }
+        await step("a calibration outranks the preset") { try self.checkCalibrationIsKept() }
         await step("the map joins notes to collections") { try self.checkGraph() }
         await step("test notes are cleaned up") { try await self.cleanUp() }
 
@@ -569,6 +570,60 @@ final class SelfTest {
         try expect(outcome.note.due == note.due, "the due date was lost")
         try expect(outcome.note.source == note.source, "the link it came from was lost")
         try expect(outcome.note.created == note.created, "the note was re-dated")
+    }
+
+    /// Which numbers file every note: the preset, a calibration measured
+    /// here, or something typed into overrides.json. Two rules decide it, and
+    /// neither shows on screen - a measurement has to beat the shipped guess,
+    /// and a calibration from a different embedder has to be ignored, because
+    /// thresholds measured in one vector space mean nothing in another.
+    ///
+    /// Done against a file in Caches, not the real `_lab/calibrated.json`: a
+    /// check that overwrote the device's own calibration would cost more than
+    /// it proves.
+    private func checkCalibrationIsKept() throws {
+        let preset = Thresholds.appleGuess(embedderID: "self-test-embedder")
+        var measured = preset
+        measured.fileFloor = preset.fileFloor - 0.05
+        measured.reviewFloor = preset.reviewFloor - 0.05
+
+        let stored = CalibratedThresholds.Stored(
+            measuredAt: Timestamp.utcNow(),
+            gap: 0.12,
+            verdict: "workable separation",
+            thresholds: measured
+        )
+        let url = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("self-test-calibrated.json")
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        try CalibratedThresholds.save(stored, to: url)
+        guard let read = CalibratedThresholds.load(from: url) else {
+            throw Failed("the calibration did not read back")
+        }
+        try expect(read.thresholds == measured, "the numbers changed on the way through the file")
+
+        let mine = CalibratedThresholds.effective(
+            preset: preset, calibrated: read, overrides: DevOverrides(),
+            embedderID: "self-test-embedder"
+        )
+        try expect(
+            mine.thresholds.fileFloor == measured.fileFloor,
+            "the shipped preset won over a measurement from this device"
+        )
+
+        let foreign = CalibratedThresholds.effective(
+            preset: preset, calibrated: read, overrides: DevOverrides(),
+            embedderID: "a-different-embedder"
+        )
+        try expect(
+            foreign.thresholds.fileFloor == preset.fileFloor,
+            "thresholds from another embedder were used anyway"
+        )
+        try expect(
+            foreign.notes.contains { $0.contains("ignored") },
+            "nothing in the log would say why they were ignored"
+        )
     }
 
     private func cleanUp() async throws {

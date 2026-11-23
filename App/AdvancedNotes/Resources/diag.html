@@ -250,6 +250,7 @@ document.getElementById('calibrate').onclick = async (ev) => {
     rows.push(row('notes', esc(r.noteCount)));
     rows.push(row('took', esc(r.elapsedMS) + ' ms'));
     if (r.exportedTo) rows.push(row('exported', '<span class="v mono">' + esc(r.exportedTo) + '</span>'));
+    if (r.appliedDetail) rows.push(row('applied', pill(r.applied, r.appliedDetail)));
     out.innerHTML = card('Calibration', rows, '<p class="verdict">' + esc(r.recommendation) + '</p>');
     blob.textContent = JSON.stringify(r, null, 2);
   } catch (err) {

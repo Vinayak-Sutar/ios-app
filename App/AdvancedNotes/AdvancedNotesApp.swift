@@ -339,7 +339,9 @@ final class WebHost: ObservableObject {
             let gardener = Gardener(
                 vault: vault, embedding: embedding, thresholds: { capture.thresholds }
             )
-            let calibration = CalibrationRun(embedding: embedding, vault: vault)
+            let calibration = CalibrationRun(
+                embedding: embedding, vault: vault, apply: { capture.thresholds = $0 }
+            )
             let previews = LinkPreviews(vault: vault)
             let selfTest = SelfTest(
                 vault: vault, capture: capture, chat: chat,
@@ -379,11 +381,23 @@ final class WebHost: ObservableObject {
             Task {
                 await embedding.prepare()
                 embedderSummary = embedding.failure ?? embedding.identifier
+                // Preset, then anything calibration measured on this device,
+                // then anything typed into overrides.json - in that order of
+                // authority. Calibration used to stop at a recommendation, so
+                // the app filed with a guess while the measurement sat in a
+                // JSON blob on the diagnostics page.
                 let base = Thresholds.appleGuess(embedderID: embedding.identifier)
-                let (merged, rejected) = overrides.apply(to: base)
+                let (merged, notes) = CalibratedThresholds.effective(
+                    preset: base,
+                    calibrated: CalibratedThresholds.load(
+                        from: CalibratedThresholds.url(in: vault.root)
+                    ),
+                    overrides: overrides,
+                    embedderID: embedding.identifier
+                )
                 capture.thresholds = merged
-                for note in rejected {
-                    Log.vault.error("override ignored: \(note, privacy: .public)")
+                for note in notes {
+                    Log.vault.notice("thresholds: \(note, privacy: .public)")
                 }
                 await vault.reload(using: embedding.embedder)
 
